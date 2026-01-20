@@ -1,5 +1,7 @@
 #include "AudioMenu.hpp"
 
+#include "SFML/Audio/PlaybackDevice.hpp"
+
 #define NUM_TOTAL_MENU_OPTIONS (sizeof(pollable_options)/sizeof(pollable_options[0]))
 
 struct AudioMenuOptionInfo {
@@ -28,26 +30,45 @@ static const AudioMenuOptionInfo audio_max_latency_option = {
 .out_action = AUDIO_MENU_MAX_LATENCY_DEC};
 
 static const AudioMenuOptionInfo audio_output_type_option = {
-.base_name = "Audio Output", .false_name = "",
+.base_name = "Sound", .false_name = "",
 .is_inc = true, .dec_str = "<", .inc_str = ">", .inc_out_action = AUDIO_MENU_OUTPUT_INC,
 .out_action = AUDIO_MENU_OUTPUT_DEC};
+
+static const AudioMenuOptionInfo audio_mode_output_option = {
+.base_name = "Priority", .false_name = "",
+.is_inc = true, .dec_str = "<", .inc_str = ">", .inc_out_action = AUDIO_MENU_MODE_INC,
+.out_action = AUDIO_MENU_MODE_DEC};
 
 static const AudioMenuOptionInfo audio_restart_option = {
 .base_name = "Restart Audio", .false_name = "",
 .is_inc = false, .dec_str = "", .inc_str = "", .inc_out_action = AUDIO_MENU_NO_ACTION,
 .out_action = AUDIO_MENU_RESTART};
 
+static const AudioMenuOptionInfo audio_next_device_option = {
+.base_name = "Select Output Device", .false_name = "",
+.is_inc = false, .dec_str = "", .inc_str = "", .inc_out_action = AUDIO_MENU_NO_ACTION,
+.out_action = AUDIO_MENU_CHANGE_DEVICE};
+
+static const AudioMenuOptionInfo audio_auto_scan_option = {
+.base_name = "Disable Automatic Device Scan", .false_name = "Enable Automatic Device Scan",
+.is_inc = false, .dec_str = "", .inc_str = "", .inc_out_action = AUDIO_MENU_NO_ACTION,
+.out_action = AUDIO_MENU_AUTO_SCAN};
+
+
 static const AudioMenuOptionInfo* pollable_options[] = {
 &audio_volume_option,
 &audio_mute_option,
-&audio_max_latency_option,
 &audio_output_type_option,
+&audio_max_latency_option,
+&audio_mode_output_option,
+//&audio_auto_scan_option,
+&audio_next_device_option,
 &audio_restart_option,
 };
 
-AudioMenu::AudioMenu(bool font_load_success, sf::Font &text_font) : OptionSelectionMenu(){
+AudioMenu::AudioMenu(TextRectanglePool* text_rectangle_pool) : OptionSelectionMenu(){
 	this->options_indexes = new int[NUM_TOTAL_MENU_OPTIONS];
-	this->initialize(font_load_success, text_font);
+	this->initialize(text_rectangle_pool);
 	this->num_enabled_options = 0;
 }
 
@@ -62,8 +83,8 @@ void AudioMenu::class_setup() {
 	this->width_divisor_menu = 9;
 	this->base_height_factor_menu = 12;
 	this->base_height_divisor_menu = 6;
-	this->min_text_size = 0.3;
-	this->max_width_slack = 1.1;
+	this->min_text_size = 0.3f;
+	this->max_width_slack = 1.1f;
 	this->menu_color = sf::Color(30, 30, 60, 192);
 	this->title = "Audio Settings";
 	this->show_back_x = true;
@@ -73,8 +94,8 @@ void AudioMenu::class_setup() {
 
 void AudioMenu::insert_data() {
 	this->num_enabled_options = 0;
-	for(int i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
-		this->options_indexes[this->num_enabled_options] = i;
+	for(size_t i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
+		this->options_indexes[this->num_enabled_options] = (int)i;
 		this->num_enabled_options++;
 	}
 	this->prepare_options();
@@ -93,7 +114,7 @@ void AudioMenu::set_output_option(int index, int action) {
 		this->selected_index = pollable_options[this->options_indexes[index]]->out_action;
 }
 
-int AudioMenu::get_num_options() {
+size_t AudioMenu::get_num_options() {
 	return this->num_enabled_options;
 }
 
@@ -127,13 +148,19 @@ void AudioMenu::prepare(float menu_scaling_factor, int view_size_x, int view_siz
 				this->labels[index]->setText(this->setTextOptionInt(real_index, audio_data->get_real_volume()));
 				break;
 			case AUDIO_MENU_MAX_LATENCY_DEC:
-				this->labels[index]->setText(this->setTextOptionInt(real_index, audio_data->get_max_audio_latency()));
+				this->labels[index]->setText(this->setTextOptionInt(real_index, (int)audio_data->get_max_audio_latency()));
 				break;
 			case AUDIO_MENU_OUTPUT_DEC:
 				this->labels[index]->setText(this->setTextOptionString(real_index, audio_data->get_audio_output_name()));
 				break;
+			case AUDIO_MENU_MODE_DEC:
+				this->labels[index]->setText(this->setTextOptionString(real_index, audio_data->get_audio_mode_name()));
+				break;
 			case AUDIO_MENU_MUTE:
 				this->labels[index]->setText(this->setTextOptionBool(real_index, audio_data->get_mute()));
+				break;
+			case AUDIO_MENU_AUTO_SCAN:
+				this->labels[index]->setText(this->setTextOptionBool(real_index, audio_data->get_auto_device_scan()));
 				break;
 			default:
 				break;

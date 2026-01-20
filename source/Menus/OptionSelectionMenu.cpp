@@ -5,25 +5,24 @@ OptionSelectionMenu::OptionSelectionMenu() {
 }
 
 OptionSelectionMenu::~OptionSelectionMenu() {
-	for(int i = 0; i < this->num_elements_displayed_per_screen; i++)
-		delete this->labels[i];
 	delete []this->labels;
 	delete []this->selectable_labels;
 	delete []this->future_enabled_labels;
 	delete []this->loaded_enabled_labels;
 }
 
-void OptionSelectionMenu::initialize(bool font_load_success, sf::Font &text_font) {
+void OptionSelectionMenu::initialize(TextRectanglePool* text_pool) {
 	this->class_setup();
 	this->after_class_setup_connected_values();
 	this->menu_rectangle.setFillColor(this->menu_color);
 	this->menu_rectangle.setPosition({1, 1});
+	text_pool->request_num_text_rectangles(this->num_elements_displayed_per_screen);
 	this->labels = new TextRectangle*[this->num_elements_displayed_per_screen];
 	this->selectable_labels = new bool[this->num_elements_displayed_per_screen];
 	this->future_enabled_labels = new bool[this->num_elements_displayed_per_screen];
 	this->loaded_enabled_labels = new bool[this->num_elements_displayed_per_screen];
 	for(int i = 0; i < this->num_elements_displayed_per_screen; i++) {
-		this->labels[i] = new TextRectangle(font_load_success, text_font);
+		this->labels[i] = text_pool->get_text_rectangle(i);
 		this->labels[i]->setProportionalBox(false);
 		this->labels[i]->setText(std::to_string(i));
 		this->labels[i]->setShowText(true);
@@ -50,8 +49,8 @@ void OptionSelectionMenu::class_setup() {
 	this->width_divisor_menu = 1;
 	this->base_height_factor_menu = 1;
 	this->base_height_divisor_menu = 1;
-	this->min_text_size = 0.3;
-	this->max_width_slack = 1.1;
+	this->min_text_size = 0.3f;
+	this->max_width_slack = 1.1f;
 	this->menu_color = sf::Color(30, 30, 60, 192);
 	this->title = "Sample Menu";
 	this->show_back_x = false;
@@ -87,11 +86,13 @@ bool OptionSelectionMenu::can_execute_action() {
 	return false;
 }
 
-void OptionSelectionMenu::reset_data() {
+void OptionSelectionMenu::reset_data(bool full_reset) {
 	this->last_input_processed_time = std::chrono::high_resolution_clock::now();
-	this->reset_output_option();
-	this->future_data.option_selected = -1;
-	this->future_data.page = 0;
+	if(full_reset) {
+		this->reset_output_option();
+		this->future_data.option_selected = -1;
+		this->future_data.page = 0;
+	}
 }
 
 bool OptionSelectionMenu::is_option_location_left(int option) {
@@ -110,8 +111,6 @@ bool OptionSelectionMenu::is_option_element(int option) {
 }
 
 bool OptionSelectionMenu::is_option_location_multichoice(int option) {
-	bool location_left = true;
-
 	if((option == this->next_page_id) || (option == this->prev_page_id))
 		return true;
 	if(this->is_option_element(option) && (((option - this->elements_start_id) % this->single_option_multiplier) != 0))
@@ -197,7 +196,7 @@ void OptionSelectionMenu::reset_output_option() {
 void OptionSelectionMenu::set_output_option(int index, int action) {
 }
 
-int OptionSelectionMenu::get_num_options() {
+size_t OptionSelectionMenu::get_num_options() {
 	return this->num_options_per_screen;
 }
 
@@ -226,14 +225,15 @@ std::string OptionSelectionMenu::setTextOptionBool(int index, bool value) {
 		return this->get_string_option(index, DEFAULT_ACTION);
 	return this->get_string_option(index, FALSE_ACTION);
 }
+
 std::string OptionSelectionMenu::setTextOptionFloat(int index, float value, int num_decimals) {
 	std::string out = this->get_string_option(index, DEFAULT_ACTION) + ": " + get_float_str_decimals(value, num_decimals);
 	return out;
 }
 
 int OptionSelectionMenu::get_num_pages() {
-	int num_pages = 1 + ((this->get_num_options() - 1) / this->num_options_per_screen);
-	if(this->get_num_options() == (this->num_options_per_screen + 1))
+	int num_pages = (int)(1 + ((this->get_num_options() - 1) / this->num_options_per_screen));
+	if(this->get_num_options() == ((size_t)(this->num_options_per_screen + 1)))
 		num_pages = 1;
 	return num_pages;
 }
@@ -243,7 +243,7 @@ void OptionSelectionMenu::prepare_options() {
 	if(this->future_data.page >= num_pages)
 		this->future_data.page = num_pages - 1;
 	int start = this->future_data.page * this->num_options_per_screen;
-	int total_elements = this->get_num_options() - start;
+	int total_elements = (int)(this->get_num_options() - start);
 	if((num_pages > 1) && (total_elements > this->num_options_per_screen))
 		total_elements = this->num_options_per_screen;
 	for(int i = 0; i < this->num_elements_displayed_per_screen; i++) {
@@ -321,9 +321,9 @@ void OptionSelectionMenu::option_selection_handling() {
 		this->set_output_option((elem_index / this->single_option_multiplier) + start, elem_index % this->single_option_multiplier);
 		this->last_action_time = std::chrono::high_resolution_clock::now();
 	}
-	else if((this->future_data.option_selected == this->prev_page_id) && this->future_data.page > 0)
+	else if((this->future_data.option_selected == this->prev_page_id) && (this->future_data.page > 0))
 		this->future_data.page--;
-	else if((this->future_data.option_selected == this->next_page_id) && this->future_data.page < ((this->get_num_options() - 1) / this->num_options_per_screen))
+	else if((this->future_data.option_selected == this->next_page_id) && (this->future_data.page < ((int)((this->get_num_options() - 1) / this->num_options_per_screen))))
 		this->future_data.page++;
 	if(old_loaded_page != this->future_data.page) {
 		this->prepare_options();
@@ -383,14 +383,8 @@ bool OptionSelectionMenu::poll(SFEvent &event_data) {
 	bool consumed = true;
 	switch (event_data.type) {
 	case EVENT_TEXT_ENTERED:
-		switch (event_data.unicode) {
-		default:
-			consumed = false;
-			break;
-		}
-
+		consumed = false;
 		break;
-		
 	case EVENT_KEY_PRESSED:
 		switch (event_data.code) {
 		case sf::Keyboard::Key::Up:
@@ -489,7 +483,7 @@ bool OptionSelectionMenu::poll(SFEvent &event_data) {
 void OptionSelectionMenu::draw(float scaling_factor, sf::RenderTarget &window) {
 	const sf::Vector2f rect_size = this->menu_rectangle.getSize();
 	if((this->loaded_data.menu_width != rect_size.x) || (this->loaded_data.menu_height != rect_size.y)) {
-		this->menu_rectangle.setSize(sf::Vector2f(this->loaded_data.menu_width, this->loaded_data.menu_height));
+		this->menu_rectangle.setSize(sf::Vector2f((float)this->loaded_data.menu_width, (float)this->loaded_data.menu_height));
 	}
 	this->menu_rectangle.setPosition({(float)this->loaded_data.pos_x, (float)this->loaded_data.pos_y});
 	window.draw(this->menu_rectangle);
@@ -500,7 +494,9 @@ void OptionSelectionMenu::draw(float scaling_factor, sf::RenderTarget &window) {
 }
 
 void OptionSelectionMenu::prepare_text_slices(int x_multiplier, int x_divisor, int y_multiplier, int y_divisor, int index, float text_scaling_factor, bool center) {
-	this->labels[index]->setTextFactor(text_scaling_factor);
+	int elem_index = index - this->elements_start_id;
+	int start = this->num_options_per_screen * this->future_data.page;
+	this->labels[index]->setTextFactor(text_scaling_factor * this->get_option_text_factor((elem_index / this->single_option_multiplier) + start));
 	int x_base_pos = (this->future_data.menu_width * x_multiplier) / x_divisor;
 	int y_base_pos = (this->future_data.menu_height * y_multiplier) / y_divisor;
 	int x_size = ((this->future_data.menu_width * (x_multiplier + 1)) / x_divisor) - x_base_pos;
@@ -540,7 +536,7 @@ void OptionSelectionMenu::base_prepare(float menu_scaling_factor, int view_size_
 			has_bottom = true;
 	if(has_bottom)
 		num_elements += 1;
-	const float base_height = (this->num_vertical_slices * BASE_PIXEL_FONT_HEIGHT * 11) / 9;
+	const float base_height = (this->num_vertical_slices * BASE_PIXEL_FONT_HEIGHT * 11.0f) / 9.0f;
 	int max_width = (view_size_x * 9) / 10;
 	int max_height = (view_size_y * 9) / 10;
 	float max_width_corresponding_height = (max_width * this->width_divisor_menu * this->max_width_slack) / this->width_factor_menu;
@@ -560,14 +556,12 @@ void OptionSelectionMenu::base_prepare(float menu_scaling_factor, int view_size_
 	if(num_elements_text_scaling_factor < this->min_elements_text_scaling_factor)
 		num_elements_text_scaling_factor = this->min_elements_text_scaling_factor;
 	float text_scaling_factor = (menu_scaling_factor * this->num_vertical_slices) / num_elements_text_scaling_factor;
-	this->future_data.menu_height = base_height * final_menu_scaling_factor;
+	this->future_data.menu_height = (int)(base_height * final_menu_scaling_factor);
 	this->future_data.menu_width = (this->future_data.menu_height * this->width_factor_menu) / this->width_divisor_menu;
 	if(this->future_data.menu_width > max_width)
 		this->future_data.menu_width = max_width;
 	this->future_data.pos_x = (view_size_x - this->future_data.menu_width) / 2;
 	this->future_data.pos_y = (view_size_y - this->future_data.menu_height) / 2;
-	int slice_y_size = this->future_data.menu_height / num_elements;
-	int slice_x_size = this->future_data.menu_width / this->num_page_elements;
 	int num_rendered_y = 0;
 	if(this->future_enabled_labels[this->back_x_id]) {
 		int top_divisor = 1;

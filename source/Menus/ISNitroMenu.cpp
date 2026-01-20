@@ -9,6 +9,8 @@ struct ISNitroMenuOptionInfo {
 	const bool is_selectable;
 	const bool is_capture_valid;
 	const bool is_emulator_valid;
+	const bool is_nitro_valid;
+	const bool is_twl_valid;
 	const bool is_inc;
 	const std::string dec_str;
 	const std::string inc_str;
@@ -19,37 +21,57 @@ struct ISNitroMenuOptionInfo {
 static const ISNitroMenuOptionInfo is_nitro_delay_option = {
 .base_name = "Delay", .false_name = "", .is_selectable = false,
 .is_capture_valid = false, .is_emulator_valid = true,
+.is_nitro_valid = true, .is_twl_valid = false,
 .is_inc = false, .dec_str = "", .inc_str = "", .inc_out_action = ISN_MENU_NO_ACTION,
 .out_action = ISN_MENU_DELAY};
 
 static const ISNitroMenuOptionInfo is_nitro_type_option = {
 .base_name = "Capture", .false_name = "", .is_selectable = true,
 .is_capture_valid = true, .is_emulator_valid = true,
+.is_nitro_valid = true, .is_twl_valid = false,
 .is_inc = true, .dec_str = "<", .inc_str = ">", .inc_out_action = ISN_MENU_TYPE_INC,
 .out_action = ISN_MENU_TYPE_DEC};
 
 static const ISNitroMenuOptionInfo is_nitro_speed_option = {
 .base_name = "Speed", .false_name = "", .is_selectable = true,
 .is_capture_valid = true, .is_emulator_valid = true,
-.is_inc = true, .dec_str = "<", .inc_str = ">", .inc_out_action = ISN_MENU_SPEED_INC,
-.out_action = ISN_MENU_SPEED_DEC};
+.is_nitro_valid = true, .is_twl_valid = true,
+.is_inc = true, .dec_str = "<", .inc_str = ">", .inc_out_action = ISN_MENU_SPEED_DEC,
+.out_action = ISN_MENU_SPEED_INC};
 
 static const ISNitroMenuOptionInfo is_nitro_reset_option = {
 .base_name = "Reset Hardware", .false_name = "", .is_selectable = true,
 .is_capture_valid = true, .is_emulator_valid = false,
+.is_nitro_valid = true, .is_twl_valid = true,
 .is_inc = false, .dec_str = "", .inc_str = "", .inc_out_action = ISN_MENU_NO_ACTION,
 .out_action = ISN_MENU_RESET};
+
+static const ISNitroMenuOptionInfo is_nitro_battery_percentage_option = {
+.base_name = "Battery Percentage", .false_name = "", .is_selectable = true,
+.is_capture_valid = true, .is_emulator_valid = false,
+.is_nitro_valid = false, .is_twl_valid = true,
+.is_inc = true, .dec_str = "-", .inc_str = "+", .inc_out_action = ISN_MENU_BATTERY_INC,
+.out_action = ISN_MENU_BATTERY_DEC};
+
+static const ISNitroMenuOptionInfo is_nitro_ac_adapter_option = {
+.base_name = "Disconnect AC Adapter", .false_name = "Connect AC Adapter", .is_selectable = true,
+.is_capture_valid = true, .is_emulator_valid = false,
+.is_nitro_valid = false, .is_twl_valid = true,
+.is_inc = false, .dec_str = "", .inc_str = "", .inc_out_action = ISN_MENU_NO_ACTION,
+.out_action = ISN_MENU_AC_ADAPTER_TOGGLE};
 
 static const ISNitroMenuOptionInfo* pollable_options[] = {
 &is_nitro_delay_option,
 &is_nitro_type_option,
 &is_nitro_speed_option,
+&is_nitro_battery_percentage_option,
+&is_nitro_ac_adapter_option,
 &is_nitro_reset_option,
 };
 
-ISNitroMenu::ISNitroMenu(bool font_load_success, sf::Font &text_font) : OptionSelectionMenu(){
+ISNitroMenu::ISNitroMenu(TextRectanglePool* text_rectangle_pool) : OptionSelectionMenu(){
 	this->options_indexes = new int[NUM_TOTAL_MENU_OPTIONS];
-	this->initialize(font_load_success, text_font);
+	this->initialize(text_rectangle_pool);
 	this->num_enabled_options = 0;
 }
 
@@ -64,8 +86,8 @@ void ISNitroMenu::class_setup() {
 	this->width_divisor_menu = 9;
 	this->base_height_factor_menu = 12;
 	this->base_height_divisor_menu = 6;
-	this->min_text_size = 0.3;
-	this->max_width_slack = 1.1;
+	this->min_text_size = 0.3f;
+	this->max_width_slack = 1.1f;
 	this->menu_color = sf::Color(30, 30, 60, 192);
 	this->title = "IS Nitro Settings";
 	this->show_back_x = true;
@@ -75,21 +97,33 @@ void ISNitroMenu::class_setup() {
 
 void ISNitroMenu::insert_data(CaptureDevice* device) {
 	bool is_capture = false;
+	bool is_nitro = false;
+	bool is_twl = false;
 	#ifdef USE_IS_DEVICES_USB
 	is_capture = is_device_is_capture(device);
+	is_nitro = is_device_is_nitro(device);
+	is_twl = is_device_is_twl(device);
 	#endif
 	this->num_enabled_options = 0;
-	for(int i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
+	for(size_t i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
 		bool valid = true;
 		if(is_capture)
 			valid = valid && pollable_options[i]->is_capture_valid;
 		else
 			valid = valid && pollable_options[i]->is_emulator_valid;
+		if(is_nitro)
+			valid = valid && pollable_options[i]->is_nitro_valid;
+		if(is_twl)
+			valid = valid && pollable_options[i]->is_twl_valid;
 		if(valid) {
-			this->options_indexes[this->num_enabled_options] = i;
+			this->options_indexes[this->num_enabled_options] = (int)i;
 			this->num_enabled_options++;
 		}
 	}
+	if(is_nitro)
+		this->title = "IS Nitro Settings";
+	if(is_twl)
+		this->title = "IS TWL Settings";
 	this->prepare_options();
 }
 
@@ -106,7 +140,7 @@ void ISNitroMenu::set_output_option(int index, int action) {
 		this->selected_index = pollable_options[this->options_indexes[index]]->out_action;
 }
 
-int ISNitroMenu::get_num_options() {
+size_t ISNitroMenu::get_num_options() {
 	return this->num_enabled_options;
 }
 
@@ -170,8 +204,14 @@ void ISNitroMenu::prepare(float menu_scaling_factor, int view_size_x, int view_s
 			case ISN_MENU_TYPE_DEC:
 				this->labels[index]->setText(this->setTextOptionString(real_index, get_capture_type_name(capture_status->capture_type)));
 				break;
-			case ISN_MENU_SPEED_DEC:
+			case ISN_MENU_SPEED_INC:
 				this->labels[index]->setText(this->setTextOptionString(real_index, get_capture_speed_name(capture_status->capture_speed)));
+				break;
+			case ISN_MENU_BATTERY_DEC:
+				this->labels[index]->setText(this->setTextOptionInt(real_index, capture_status->is_battery_percentage));
+				break;
+			case ISN_MENU_AC_ADAPTER_TOGGLE:
+				this->labels[index]->setText(this->setTextOptionBool(real_index, capture_status->is_ac_adapter_connected));
 				break;
 			default:
 				break;

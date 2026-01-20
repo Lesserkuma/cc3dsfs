@@ -1,4 +1,5 @@
 #include "ExtraSettingsMenu.hpp"
+#include "USBConflictResolutionMenu.hpp"
 
 #define NUM_TOTAL_MENU_OPTIONS (sizeof(pollable_options)/sizeof(pollable_options[0]))
 
@@ -10,6 +11,8 @@ struct ExtraSettingsMenuOptionInfo {
 	const bool active_joint_screen;
 	const bool active_top_screen;
 	const bool active_bottom_screen;
+	const bool active_regular;
+	const bool active_mono_app;
 	const ExtraSettingsMenuOutAction out_action;
 };
 
@@ -17,50 +20,72 @@ static const ExtraSettingsMenuOptionInfo warning_option = {
 .base_name = "Advanced users only!", .is_selectable = false,
 .active_fullscreen = true, .active_windowed_screen = true,
 .active_joint_screen = true, .active_top_screen = true, .active_bottom_screen = true,
+.active_regular = true, .active_mono_app = true,
 .out_action = EXTRA_SETTINGS_MENU_NO_ACTION};
+
+static const ExtraSettingsMenuOptionInfo reset_to_default_option = {
+.base_name = "Reset Settings", .is_selectable = true,
+.active_fullscreen = true, .active_windowed_screen = true,
+.active_joint_screen = true, .active_top_screen = true, .active_bottom_screen = true,
+.active_regular = true, .active_mono_app = true,
+.out_action = EXTRA_SETTINGS_MENU_RESET_SETTINGS};
 
 static const ExtraSettingsMenuOptionInfo windowed_option = {
 .base_name = "Windowed Mode", .is_selectable = true,
 .active_fullscreen = true, .active_windowed_screen = false,
 .active_joint_screen = true, .active_top_screen = true, .active_bottom_screen = true,
+.active_regular = false, .active_mono_app = true,
 .out_action = EXTRA_SETTINGS_MENU_FULLSCREEN};
 
 static const ExtraSettingsMenuOptionInfo fullscreen_option = {
 .base_name = "Fullscreen Mode", .is_selectable = true,
 .active_fullscreen = false, .active_windowed_screen = true,
 .active_joint_screen = true, .active_top_screen = true, .active_bottom_screen = true,
+.active_regular = false, .active_mono_app = true,
 .out_action = EXTRA_SETTINGS_MENU_FULLSCREEN};
 
 static const ExtraSettingsMenuOptionInfo join_screens_option = {
 .base_name = "Join Screens", .is_selectable = true,
 .active_fullscreen = true, .active_windowed_screen = true,
 .active_joint_screen = false, .active_top_screen = true, .active_bottom_screen = true,
+.active_regular = false, .active_mono_app = true,
 .out_action = EXTRA_SETTINGS_MENU_SPLIT};
 
 static const ExtraSettingsMenuOptionInfo split_screens_option = {
 .base_name = "Split Screens", .is_selectable = true,
 .active_fullscreen = true, .active_windowed_screen = true,
 .active_joint_screen = true, .active_top_screen = false, .active_bottom_screen = false,
+.active_regular = false, .active_mono_app = true,
 .out_action = EXTRA_SETTINGS_MENU_SPLIT};
 
 static const ExtraSettingsMenuOptionInfo quit_option = {
 .base_name = "Quit Application", .is_selectable = true,
 .active_fullscreen = true, .active_windowed_screen = true,
 .active_joint_screen = true, .active_top_screen = true, .active_bottom_screen = true,
+.active_regular = false, .active_mono_app = true,
 .out_action = EXTRA_SETTINGS_MENU_QUIT_APPLICATION};
+
+static const ExtraSettingsMenuOptionInfo usb_conflict_resolution_menu_option = {
+.base_name = "USB Conflict Resolution", .is_selectable = true,
+.active_fullscreen = true, .active_windowed_screen = true,
+.active_joint_screen = true, .active_top_screen = true, .active_bottom_screen = true,
+.active_regular = true, .active_mono_app = true,
+.out_action = EXTRA_SETTINGS_MENU_USB_CONFLICT_RESOLUTION};
 
 static const ExtraSettingsMenuOptionInfo* pollable_options[] = {
 &warning_option,
+&reset_to_default_option,
 &windowed_option,
 &fullscreen_option,
 &join_screens_option,
 &split_screens_option,
+&usb_conflict_resolution_menu_option,
 &quit_option,
 };
 
-ExtraSettingsMenu::ExtraSettingsMenu(bool font_load_success, sf::Font &text_font) : OptionSelectionMenu(){
+ExtraSettingsMenu::ExtraSettingsMenu(TextRectanglePool* text_rectangle_pool) : OptionSelectionMenu(){
 	this->options_indexes = new int[NUM_TOTAL_MENU_OPTIONS];
-	this->initialize(font_load_success, text_font);
+	this->initialize(text_rectangle_pool);
 	this->num_enabled_options = 0;
 }
 
@@ -75,8 +100,8 @@ void ExtraSettingsMenu::class_setup() {
 	this->width_divisor_menu = 9;
 	this->base_height_factor_menu = 12;
 	this->base_height_divisor_menu = 6;
-	this->min_text_size = 0.3;
-	this->max_width_slack = 1.1;
+	this->min_text_size = 0.3f;
+	this->max_width_slack = 1.1f;
 	this->menu_color = sf::Color(30, 30, 60, 192);
 	this->title = "Extra Settings";
 	this->show_back_x = true;
@@ -84,22 +109,41 @@ void ExtraSettingsMenu::class_setup() {
 	this->show_title = true;
 }
 
-void ExtraSettingsMenu::insert_data(ScreenType s_type, bool is_fullscreen) {
+static bool is_option_valid(const ExtraSettingsMenuOptionInfo* option, ScreenType s_type, bool is_fullscreen, bool is_mono_app) {
+	bool valid = true;
+	if(is_fullscreen)
+		valid = valid && option->active_fullscreen;
+	else
+		valid = valid && option->active_windowed_screen;
+	if(s_type == ScreenType::TOP)
+		valid = valid && option->active_top_screen;
+	else if(s_type == ScreenType::BOTTOM)
+		valid = valid && option->active_bottom_screen;
+	else
+		valid = valid && option->active_joint_screen;
+	if(is_mono_app)
+		valid = valid && option->active_mono_app;
+	else
+		valid = valid && option->active_regular;
+	if(option->out_action == EXTRA_SETTINGS_MENU_USB_CONFLICT_RESOLUTION)
+		valid = valid && (USBConflictResolutionMenu::get_total_possible_selectable_inserted() > 0);
+	return valid;
+}
+
+int ExtraSettingsMenu::get_total_possible_selectable_inserted(ScreenType s_type, bool is_fullscreen, bool is_mono_app) {
+	int num_insertable = 0;
+	for(size_t i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
+		if(is_option_valid(pollable_options[i], s_type, is_fullscreen, is_mono_app) && pollable_options[i]->is_selectable)
+			num_insertable++;
+	}
+	return num_insertable;
+}
+
+void ExtraSettingsMenu::insert_data(ScreenType s_type, bool is_fullscreen, bool is_mono_app) {
 	this->num_enabled_options = 0;
-	for(int i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
-		bool valid = true;
-		if(is_fullscreen)
-			valid = valid && pollable_options[i]->active_fullscreen;
-		else
-			valid = valid && pollable_options[i]->active_windowed_screen;
-		if(s_type == ScreenType::TOP)
-			valid = valid && pollable_options[i]->active_top_screen;
-		else if(s_type == ScreenType::BOTTOM)
-			valid = valid && pollable_options[i]->active_bottom_screen;
-		else
-			valid = valid && pollable_options[i]->active_joint_screen;
-		if(valid) {
-			this->options_indexes[this->num_enabled_options] = i;
+	for(size_t i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
+		if(is_option_valid(pollable_options[i], s_type, is_fullscreen, is_mono_app)) {
+			this->options_indexes[this->num_enabled_options] = (int)i;
 			this->num_enabled_options++;
 		}
 	}
@@ -121,7 +165,7 @@ bool ExtraSettingsMenu::is_option_selectable(int index, int action) {
 	return pollable_options[this->options_indexes[index]]->is_selectable;
 }
 
-int ExtraSettingsMenu::get_num_options() {
+size_t ExtraSettingsMenu::get_num_options() {
 	return this->num_enabled_options;
 }
 

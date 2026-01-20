@@ -40,11 +40,13 @@ enum VideoMenuOutAction{
 	VIDEO_MENU_SCALING_RATIO_SETTINGS,
 	VIDEO_MENU_CHANGE_TITLEBAR,
 	VIDEO_MENU_VIDEO_EFFECTS_SETTINGS,
+	VIDEO_MENU_SEPARATOR_SETTINGS,
+	VIDEO_MENU_3D_SETTINGS,
 };
 
 class VideoMenu : public OptionSelectionMenu {
 public:
-	VideoMenu(bool font_load_success, sf::Font &text_font);
+	VideoMenu(TextRectanglePool* text_pool);
 	~VideoMenu();
 	void prepare(float scaling_factor, int view_size_x, int view_size_y, ScreenInfo *info, ScreenType screen_type);
 	void insert_data(ScreenType s_type, bool is_fullscreen, bool can_have_titlebar);
@@ -53,11 +55,11 @@ public:
 protected:
 	bool is_option_inc_dec(int index);
 	void set_output_option(int index, int action);
-	int get_num_options();
+	size_t get_num_options();
 	std::string get_string_option(int index, int action);
 	void class_setup();
 private:
 	int *options_indexes;
-	int num_enabled_options;
+	size_t num_enabled_options;
 };
 #endif

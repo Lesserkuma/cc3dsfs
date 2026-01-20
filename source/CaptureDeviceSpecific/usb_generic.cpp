@@ -1,13 +1,25 @@
 #include "usb_generic.hpp"
+#include "utils.hpp"
 #include <thread>
+#include <mutex>
 
-static bool usb_thread_run = false;
 static bool usb_initialized = false;
 static libusb_context* usb_ctx = NULL; // libusb session context
+static int usb_thread_registered = 0;
+std::thread usb_thread;
+std::mutex usb_thread_mutex;
 
 void usb_init() {
 	if(usb_initialized)
 		return;
+	#ifdef ANDROID_COMPILATION
+	ANativeActivity* native_activity_ptr = getAndroidNativeActivity();
+	if(native_activity_ptr) {
+		// Retrieve the JVM environment
+		JavaVM* vm  = native_activity_ptr->vm;
+		libusb_set_option(usb_ctx, LIBUSB_OPTION_ANDROID_JAVAVM, vm);
+	}
+	#endif
 	int result = libusb_init(&usb_ctx); // open session
 	if (result < 0) {
 		usb_ctx = NULL;
@@ -32,36 +44,55 @@ libusb_context* get_usb_ctx() {
 	return usb_ctx;
 }
 
-int get_usb_total_filtered_devices(const uint16_t valid_vids[], size_t num_vids, const uint16_t valid_pids[], size_t num_pids) {
+void libusb_check_and_detach_kernel_driver(void* handle, int interface) {
+	if(handle == NULL)
+		return;
+	libusb_device_handle* in_handle = (libusb_device_handle*)handle;
+	int retval = libusb_kernel_driver_active(in_handle, interface);
+	if(retval == 1)
+		libusb_detach_kernel_driver(in_handle, interface);
+}
+
+int libusb_check_and_set_configuration(void* handle, int wanted_configuration) {
+	if(handle == NULL)
+		return LIBUSB_ERROR_OTHER;
+	libusb_device_handle* in_handle = (libusb_device_handle*)handle;
+	int curr_configuration = 0;
+	int result = libusb_get_configuration(in_handle, &curr_configuration);
+	if(result != LIBUSB_SUCCESS)
+		return result;
+	if(curr_configuration != wanted_configuration)
+		result = libusb_set_configuration(in_handle, wanted_configuration);
+	return result;
+}
+
+static void libusb_usb_thread_function() {
 	if(!usb_is_initialized())
-		return 0;
-	libusb_device **usb_devices;
-	int num_devices = libusb_get_device_list(get_usb_ctx(), &usb_devices);
-	libusb_device_descriptor usb_descriptor{};
-	int num_devices_found = 0;
+		return;
+	struct timeval tv;
+	tv.tv_sec = 0;
+	tv.tv_usec = 300000;
+	while(usb_thread_registered > 0)
+		libusb_handle_events_timeout_completed(get_usb_ctx(), &tv, NULL);
+}
 
-	for(int i = 0; i < num_devices; i++) {
-		int result = libusb_get_device_descriptor(usb_devices[i], &usb_descriptor);
-		if(result < 0)
-			continue;
-		bool found_vid = false;
-		for(int j = 0; j < num_vids; j++)
-			if(usb_descriptor.idVendor == valid_vids[j]) {
-				found_vid = true;
-				break;
-			}
-		if(!found_vid)
-			continue;
-		for(int j = 0; j < num_pids; j++) {
-			if(usb_descriptor.idProduct == valid_pids[j]) {
-				num_devices_found += 1;
-				break;
-			}
-		}
-	}
+void libusb_register_to_event_thread() {
+	if(!usb_is_initialized())
+		return;
+	usb_thread_mutex.lock();
+	int old_usb_thread_registered = usb_thread_registered;
+	usb_thread_registered += 1;
+	if(old_usb_thread_registered == 0)
+		usb_thread = std::thread(libusb_usb_thread_function);
+	usb_thread_mutex.unlock();
+}
 
-	if(num_devices >= 0)
-		libusb_free_device_list(usb_devices, 1);
-
-	return num_devices_found;
+void libusb_unregister_from_event_thread() {
+	if(!usb_is_initialized())
+		return;
+	usb_thread_mutex.lock();
+	usb_thread_registered -= 1;
+	if(usb_thread_registered == 0)
+		usb_thread.join();
+	usb_thread_mutex.unlock();
 }

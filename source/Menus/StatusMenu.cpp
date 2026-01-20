@@ -10,6 +10,7 @@ enum StatusMenuID {
 	STATUS_MENU_FPS_POLL,
 	STATUS_MENU_FPS_DRAW,
 	STATUS_MENU_CONNECTION,
+	STATUS_MENU_USB_CONNECTION,
 };
 
 struct StatusMenuOptionInfo {
@@ -42,18 +43,23 @@ static const StatusMenuOptionInfo status_curr_device_option = {
 .base_name = "", .is_inc = false,
 .id = STATUS_MENU_CONNECTION};
 
+static const StatusMenuOptionInfo status_usb_connection_option = {
+.base_name = "", .is_inc = false,
+.id = STATUS_MENU_USB_CONNECTION};
+
 static const StatusMenuOptionInfo* pollable_options[] = {
 &status_name_version_option,
 &status_curr_device_option,
+&status_usb_connection_option,
 &status_url_option,
 &status_fps_in_option,
-&status_fps_poll_option,
+//&status_fps_poll_option,
 &status_fps_draw_option,
 };
 
-StatusMenu::StatusMenu(bool font_load_success, sf::Font &text_font) : OptionSelectionMenu(){
+StatusMenu::StatusMenu(TextRectanglePool* text_rectangle_pool) : OptionSelectionMenu(){
 	this->options_indexes = new int[NUM_TOTAL_MENU_OPTIONS];
-	this->initialize(font_load_success, text_font);
+	this->initialize(text_rectangle_pool);
 	this->num_enabled_options = 0;
 	this->last_update_time = std::chrono::high_resolution_clock::now();
 	this->do_update = true;
@@ -65,13 +71,13 @@ StatusMenu::~StatusMenu() {
 
 void StatusMenu::class_setup() {
 	this->num_options_per_screen = 5;
-	this->min_elements_text_scaling_factor = num_options_per_screen + 2;
+	this->min_elements_text_scaling_factor = num_options_per_screen + 1;
 	this->width_factor_menu = 16;
 	this->width_divisor_menu = 9;
 	this->base_height_factor_menu = 12;
 	this->base_height_divisor_menu = 6;
-	this->min_text_size = 0.3;
-	this->max_width_slack = 1.1;
+	this->min_text_size = 0.3f;
+	this->max_width_slack = 1.1f;
 	this->menu_color = sf::Color(30, 30, 60, 192);
 	this->title = "Status";
 	this->show_back_x = true;
@@ -83,8 +89,8 @@ void StatusMenu::insert_data() {
 	this->last_update_time = std::chrono::high_resolution_clock::now();
 	this->do_update = true;
 	this->num_enabled_options = 0;
-	for(int i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
-		this->options_indexes[this->num_enabled_options] = i;
+	for(size_t i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
+		this->options_indexes[this->num_enabled_options] = (int)i;
 		this->num_enabled_options++;
 	}
 	this->prepare_options();
@@ -99,7 +105,7 @@ void StatusMenu::set_output_option(int index, int action) {
 		this->selected_index = STATUS_MENU_BACK;
 }
 
-int StatusMenu::get_num_options() {
+size_t StatusMenu::get_num_options() {
 	return this->num_enabled_options;
 }
 
@@ -117,6 +123,12 @@ std::string StatusMenu::get_string_option(int index, int action) {
 
 bool StatusMenu::is_option_selectable(int index, int action) {
 	return false;
+}
+
+static std::string get_usb_speed_text(int usb_speed) {
+	if(usb_speed <= 0)
+		return "";
+	return "Connection: USB " + std::to_string(usb_speed);
 }
 
 void StatusMenu::prepare(float menu_scaling_factor, int view_size_x, int view_size_y, double in_fps, double poll_fps, double draw_fps, CaptureStatus* capture_status) {
@@ -145,14 +157,17 @@ void StatusMenu::prepare(float menu_scaling_factor, int view_size_x, int view_si
 				case STATUS_MENU_CONNECTION:
 					this->labels[index]->setText(get_name_of_device(capture_status, true));
 					break;
+				case STATUS_MENU_USB_CONNECTION:
+					this->labels[index]->setText(get_usb_speed_text(get_usb_speed_of_device(capture_status)));
+					break;
 				case STATUS_MENU_FPS_IN:
-					this->labels[index + INC_ACTION]->setText(get_float_str_decimals(in_fps, 2));
+					this->labels[index + INC_ACTION]->setText(get_float_str_decimals((float)in_fps * get_framerate_multiplier(capture_status), 2));
 					break;
 				case STATUS_MENU_FPS_POLL:
-					this->labels[index + INC_ACTION]->setText(get_float_str_decimals(poll_fps, 2));
+					this->labels[index + INC_ACTION]->setText(get_float_str_decimals((float)poll_fps, 2));
 					break;
 				case STATUS_MENU_FPS_DRAW:
-					this->labels[index + INC_ACTION]->setText(get_float_str_decimals(draw_fps, 2));
+					this->labels[index + INC_ACTION]->setText(get_float_str_decimals((float)draw_fps * get_framerate_multiplier(capture_status), 2));
 					break;
 				default:
 					break;

@@ -25,33 +25,12 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 
-static void is_device_usb_thread_function(bool* usb_thread_run) {
-	if(!usb_is_initialized())
-		return;
-	struct timeval tv;
-	tv.tv_sec = 0;
-	tv.tv_usec = 300000;
-	while(*usb_thread_run)
-		libusb_handle_events_timeout_completed(get_usb_ctx(), &tv, NULL);
-}
-
-void is_device_libusb_start_thread(std::thread* thread_ptr, bool* usb_thread_run) {
-	if(!usb_is_initialized())
-		return;
-	*usb_thread_run = true;
-	*thread_ptr = std::thread(is_device_usb_thread_function, usb_thread_run);
-}
-
-void is_device_libusb_close_thread(std::thread* thread_ptr, bool* usb_thread_run) {
-	if(!usb_is_initialized())
-		return;
-	*usb_thread_run = false;
-	thread_ptr->join();
-}
-
 static bool is_device_libusb_setup_connection(libusb_device_handle* handle, const is_device_usb_device* usb_device_desc) {
-	if (libusb_set_configuration(handle, usb_device_desc->default_config) != LIBUSB_SUCCESS)
+	libusb_check_and_detach_kernel_driver(handle, usb_device_desc->default_interface);
+	int result = libusb_check_and_set_configuration(handle, usb_device_desc->default_config);
+	if(result != LIBUSB_SUCCESS)
 		return false;
+	libusb_check_and_detach_kernel_driver(handle, usb_device_desc->default_interface);
 	if(libusb_claim_interface(handle, usb_device_desc->default_interface) != LIBUSB_SUCCESS)
 		return false;
 	if(usb_device_desc->do_pipe_clear_reset) {
@@ -86,11 +65,11 @@ is_device_device_handlers* is_device_libusb_serial_reconnection(const is_device_
 	if(!usb_is_initialized())
 		return NULL;
 	libusb_device **usb_devices;
-	int num_devices = libusb_get_device_list(get_usb_ctx(), &usb_devices);
+	ssize_t num_devices = libusb_get_device_list(get_usb_ctx(), &usb_devices);
 	libusb_device_descriptor usb_descriptor{};
 	is_device_device_handlers* final_handlers = NULL;
 
-	for(int i = 0; i < num_devices; i++) {
+	for(ssize_t i = 0; i < num_devices; i++) {
 		is_device_device_handlers handlers;
 		int result = libusb_get_device_descriptor(usb_devices[i], &usb_descriptor);
 		if(result < 0)
@@ -127,19 +106,19 @@ void is_device_libusb_end_connection(is_device_device_handlers* handlers, const 
 	handlers->usb_handle = NULL;
 }
 
-void is_device_libusb_list_devices(std::vector<CaptureDevice> &devices_list, bool* no_access_elems, bool* not_supported_elems, int* curr_serial_extra_id_is_device, const size_t num_is_device_desc) {
+void is_device_libusb_list_devices(std::vector<CaptureDevice> &devices_list, bool* no_access_elems, bool* not_supported_elems, int* curr_serial_extra_id_is_device, std::vector<const is_device_usb_device*> &device_descriptions) {
 	if(!usb_is_initialized())
 		return;
 	libusb_device **usb_devices;
-	int num_devices = libusb_get_device_list(get_usb_ctx(), &usb_devices);
+	ssize_t num_devices = libusb_get_device_list(get_usb_ctx(), &usb_devices);
 	libusb_device_descriptor usb_descriptor{};
 
-	for(int i = 0; i < num_devices; i++) {
+	for(ssize_t i = 0; i < num_devices; i++) {
 		int result = libusb_get_device_descriptor(usb_devices[i], &usb_descriptor);
 		if(result < 0)
 			continue;
-		for (int j = 0; j < num_is_device_desc; j++) {
-			result = is_device_libusb_insert_device(devices_list, GetISDeviceDesc(j), usb_devices[i], &usb_descriptor, curr_serial_extra_id_is_device[j]);
+		for (size_t j = 0; j < device_descriptions.size(); j++) {
+			result = is_device_libusb_insert_device(devices_list, device_descriptions[j], usb_devices[i], &usb_descriptor, curr_serial_extra_id_is_device[j]);
 			if (result != LIBUSB_ERROR_NOT_FOUND) {
 				if (result == LIBUSB_ERROR_ACCESS)
 					no_access_elems[j] = true;

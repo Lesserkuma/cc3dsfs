@@ -3,7 +3,9 @@
 #include "usb_is_device_libusb.hpp"
 #include "usb_is_device_is_driver.hpp"
 #include "is_twl_cap_init_seed_table.h"
-#include "is_twl_cap_crc32_table.h"
+// From web.mit.edu/wwwdev/src/harvest-1.3.pl3/components/gatherer/standard/unbinhex/crc/ccitt32.c
+#include "ccitt32_crc32_table.h"
+#include "usb_generic.hpp"
 
 #include <libusb.h>
 #include <cstring>
@@ -98,15 +100,21 @@ enum is_twl_capture_command {
 	IS_TWL_CAP_CMD_GET_ENC_DEC_SEEDS = 0x04,
 	IS_TWL_CAP_CMD_GET_SERIAL = 0x13,
 	IS_TWL_CAP_CMD_UNLOCK_COMMS = 0x1C,
+	IS_TWL_CAP_CMD_GENERIC_INFO = 0x80,
 	IS_TWL_CAP_CMD_MNTR = 0x81,
+	IS_TWL_CAP_CMD_POWER_ON_OFF = 0x82,
 	IS_TWL_CAP_CMD_ASK_CAPTURE_INFORMATION = 0x83,
 	IS_TWL_CAP_CMD_SCTG = 0x84,
 	IS_TWL_CAP_CMD_TCZC = 0x85,
 	IS_TWL_CAP_CMD_STOP_FRAME_READS = 0x88,
 	IS_TWL_CAP_CMD_SET_LAST_FRAME_INFORMATION = 0x8B,
 	IS_TWL_CAP_CMD_ACTS = 0x8C,
+	IS_TWL_CAP_CMD_SET_BATTERY_PERCENTAGE = 0x8D,
+	IS_TWL_CAP_CMD_SET_AC_ADAPTER_ON_OFF = 0x8E,
 	IS_TWL_CAP_CMD_EPAC = 0x92,
 	IS_TWL_CAP_CMD_POST_EPAC = 0x93,
+	IS_TWL_CAP_CMD_GET_AC_ADAPTER_ON_OFF = 0x96,
+	IS_TWL_CAP_CMD_GET_BATTERY_PERCENTAGE= 0x97,
 };
 
 enum is_nitro_emulator_forward_bits {
@@ -167,6 +175,7 @@ struct PACKED is_twl_capture_information_packet {
 
 static const is_device_usb_device usb_is_nitro_emu_rare_desc = {
 .name = "ISNEr", .long_name = "IS Nitro Emulator(R)",
+.index_in_allowed_scan = CC_IS_NITRO_EMULATOR,
 .vid = 0x0f6e, .pid = 0x0400,
 .default_config = 1, .default_interface = 0,
 .bulk_timeout = 500,
@@ -179,6 +188,7 @@ static const is_device_usb_device usb_is_nitro_emu_rare_desc = {
 
 static const is_device_usb_device usb_is_nitro_emu_common_desc = {
 .name = "ISNE", .long_name = "IS Nitro Emulator",
+.index_in_allowed_scan = CC_IS_NITRO_EMULATOR,
 .vid = 0x0f6e, .pid = 0x0404,
 .default_config = 1, .default_interface = 0,
 .bulk_timeout = 500,
@@ -191,6 +201,7 @@ static const is_device_usb_device usb_is_nitro_emu_common_desc = {
 
 static const is_device_usb_device usb_is_nitro_cap_desc = {
 .name = "ISNC", .long_name = "IS Nitro Capture",
+.index_in_allowed_scan = CC_IS_NITRO_CAPTURE,
 .vid = 0x0f6e, .pid = 0x0403,
 .default_config = 1, .default_interface = 0,
 .bulk_timeout = 500,
@@ -203,6 +214,7 @@ static const is_device_usb_device usb_is_nitro_cap_desc = {
 
 static const is_device_usb_device usb_is_twl_cap_desc = {
 .name = "ISTCD", .long_name = "IS TWL Capture (Dev)",
+.index_in_allowed_scan = CC_IS_TWL_CAPTURE,
 .vid = 0x0f6e, .pid = 0x0501,
 .default_config = 1, .default_interface = 0,
 .bulk_timeout = 500,
@@ -214,7 +226,8 @@ static const is_device_usb_device usb_is_twl_cap_desc = {
 };
 
 static const is_device_usb_device usb_is_twl_cap_desc_2 = {
-.name = "ISTCR", .long_name = "IS TWL Capture (Retail)",
+.name = "ISTCR", .long_name = "IS TWL Capture (Ret)",
+.index_in_allowed_scan = CC_IS_TWL_CAPTURE,
 .vid = 0x0f6e, .pid = 0x0502,
 .default_config = 1, .default_interface = 0,
 .bulk_timeout = 500,
@@ -263,10 +276,10 @@ static void fix_endianness_header(is_nitro_nec_packet_header* header) {
 
 static uint32_t get_crc32_data_comm(uint8_t* data, size_t size) {
 	uint32_t value = 0xFFFFFFFF;
-	for(int i = 0; i < size; i++) {
+	for(size_t i = 0; i < size; i++) {
 		uint8_t inner_value = (value >> 24) ^ data[i];
 		value <<= 8;
-		value ^= read_le32(is_twl_cap_crc32_table, inner_value);
+		value ^= read_le32(ccitt32_crc32_table, inner_value);
 	}
 	return ~value;
 }
@@ -288,29 +301,29 @@ static void apply_enc_dec_action_value(uint32_t action_value, uint32_t rotating_
 	}
 	switch((action_value & 0xFF) - 1) {
 		case 0:
-			for(int j = 0; j < size_u16; j++)
+			for(size_t j = 0; j < size_u16; j++)
 				write_be16(data, read_le16(data, j), j);
 			break;
 		case 1:
-			for(int j = 0; j < size_u16; j++) {
+			for(size_t j = 0; j < size_u16; j++) {
 				write_le16(data, read_le16(data, j) ^ rotating_value, j);
 				rotating_value += increment;
 			}
 			break;
 		case 2:
-			for(int j = 0; j < size_u16; j++) {
+			for(size_t j = 0; j < size_u16; j++) {
 				write_le16(data, read_le16(data, j) + rotating_value, j);
 				rotating_value += increment;
 			}
 			break;
 		case 3:
-			for(int j = 0; j < size_u16; j++) {
+			for(size_t j = 0; j < size_u16; j++) {
 				write_le16(data, read_le16(data, j) - rotating_value, j);
 				rotating_value += increment;
 			}
 			break;
 		case 4:
-			for(int j = 0; j < (size_u16 / 2); j++) {
+			for(size_t j = 0; j < (size_u16 / 2); j++) {
 				first_val = read_le16(data, j);
 				write_le16(data, read_le16(data, size_u16 - 1 - j), j);
 				write_le16(data, first_val, size_u16 - 1 - j);
@@ -318,13 +331,13 @@ static void apply_enc_dec_action_value(uint32_t action_value, uint32_t rotating_
 			break;
 		case 5:
 			first_val = read_le16(data);
-			for(int j = 0; j < (size_u16 - 1); j++)
+			for(size_t j = 0; j < (size_u16 - 1); j++)
 				write_le16(data, read_le16(data, j + 1), j);
 			write_le16(data, first_val, size_u16 - 1);
 			break;
 		case 6:
 			last_val = read_le16(data, size_u16 - 1);
-			for(int j = 0; j < (size_u16 - 1); j++)
+			for(size_t j = 0; j < (size_u16 - 1); j++)
 				write_le16(data, read_le16(data, size_u16 - 1 - j - 1), size_u16 - 1 - j);
 			write_le16(data, last_val);
 			break;
@@ -347,12 +360,15 @@ static void enc_dec_table_add_usage(is_device_twl_enc_dec_table* table) {
 
 static void table_print(uint8_t* data, size_t size) {
 	/*
+	std::string output = "";
 	for(size_t i = 0; i < size; i++) {
-		printf("%02x ", data[i]);
+		output += to_hex_u8(data[i]);
 		if((i % 0x10) == 0xF)
-			printf("\n");
+			output += "\n";
+		else
+			output += " ";
 	}
-	printf("\n");
+	ActualConsoleOutText(output);
 	*/
 }
 
@@ -481,9 +497,9 @@ static int SendWritePacket(is_device_device_handlers* handlers, uint16_t command
 	bool append_mode = true;
 	if(device_desc->device_type == IS_NITRO_CAPTURE_DEVICE)
 		append_mode = false;
-	int single_packet_covered_size = device_desc->max_usb_packet_size - sizeof(header);
+	int single_packet_covered_size = (int)(device_desc->max_usb_packet_size - sizeof(header));
 	if(!append_mode)
-		single_packet_covered_size = device_desc->max_usb_packet_size;
+		single_packet_covered_size = (int)device_desc->max_usb_packet_size;
 	int num_iters = (length + single_packet_covered_size - 1) / single_packet_covered_size;
 	if(!num_iters)
 		num_iters = 1;
@@ -506,7 +522,7 @@ static int SendWritePacket(is_device_device_handlers* handlers, uint16_t command
 		fix_endianness_header(&header);
 		int ret = 0;
 		int num_bytes = 0;
-		for(int j = 0; j < sizeof(is_device_packet_header); j++)
+		for(size_t j = 0; j < sizeof(is_device_packet_header); j++)
 			single_usb_packet[j] = ((uint8_t*)&header)[j];
 		if(append_mode && (buf != NULL)) {
 			for(int j = 0; j < transfer_size; j++)
@@ -526,7 +542,7 @@ static int SendWritePacket(is_device_device_handlers* handlers, uint16_t command
 		}
 		if(ret < 0)
 			return return_and_delete(single_usb_packet, ret);
-		if(num_bytes != (transfer_size + sizeof(is_device_packet_header)))
+		if(num_bytes != ((int)(transfer_size + sizeof(is_device_packet_header))))
 			return return_and_delete(single_usb_packet, LIBUSB_ERROR_INTERRUPTED);
 	}
 	if((device_desc->device_type == IS_NITRO_CAPTURE_DEVICE) && expect_result) {
@@ -545,7 +561,7 @@ static int SendWritePacket(is_device_device_handlers* handlers, uint16_t command
 
 static int SendReadPacket(is_device_device_handlers* handlers, uint16_t command, is_device_packet_type type, uint32_t address, uint8_t* buf, int length, const is_device_usb_device* device_desc, bool expect_result = true) {
 	is_device_packet_header header;
-	int single_packet_covered_size = device_desc->max_usb_packet_size;
+	int single_packet_covered_size = (int)device_desc->max_usb_packet_size;
 	int num_iters = (length + single_packet_covered_size - 1) / single_packet_covered_size;
 	if(num_iters == 0)
 		num_iters = 1;
@@ -594,11 +610,11 @@ static int SendReadWritePacket(is_device_device_handlers* handlers, uint16_t com
 	if((device_desc->device_type == IS_NITRO_EMULATOR_DEVICE) || (device_desc->device_type == IS_NITRO_CAPTURE_DEVICE))
 		return LIBUSB_SUCCESS;
 	is_device_rw_packet_header header;
-	int single_packet_covered_size_w = device_desc->max_usb_packet_size - sizeof(header);
+	int single_packet_covered_size_w = (int)(device_desc->max_usb_packet_size - sizeof(header));
 	int num_iters_w = (length_w + single_packet_covered_size_w - 1) / single_packet_covered_size_w;
 	if(!num_iters_w)
 		num_iters_w = 1;
-	int single_packet_covered_size_r = device_desc->max_usb_packet_size;
+	int single_packet_covered_size_r = (int)device_desc->max_usb_packet_size;
 	int num_iters_r = (length_r + single_packet_covered_size_r - 1) / single_packet_covered_size_r;
 	if(!num_iters_r)
 		num_iters_r = 1;
@@ -628,7 +644,7 @@ static int SendReadWritePacket(is_device_device_handlers* handlers, uint16_t com
 		int ret = 0;
 		int num_bytes = 0;
 		if(is_packet_direction_write(device_desc->device_type, packet_direction)) {
-			for(int j = 0; j < sizeof(is_device_rw_packet_header); j++)
+			for(size_t j = 0; j < sizeof(is_device_rw_packet_header); j++)
 				single_usb_packet[j] = ((uint8_t*)&header)[j];
 			if(buf_w != NULL) {
 				for(int j = 0; j < transfer_size_w; j++)
@@ -641,7 +657,7 @@ static int SendReadWritePacket(is_device_device_handlers* handlers, uint16_t com
 			}
 			if(ret < 0)
 				return return_and_delete(single_usb_packet, ret);
-			if(num_bytes != (transfer_size_w + sizeof(is_device_rw_packet_header)))
+			if(num_bytes != ((int)(transfer_size_w + sizeof(is_device_rw_packet_header))))
 				return return_and_delete(single_usb_packet, LIBUSB_ERROR_INTERRUPTED);
 		}
 		else {
@@ -693,6 +709,14 @@ int SendWriteCommandU32(is_device_device_handlers* handlers, uint16_t command, u
 	return SendWriteCommand(handlers, command, (uint8_t*)&buffer, sizeof(uint32_t), device_desc);
 }
 
+int SendReadWriteCommandU32(is_device_device_handlers* handlers, uint16_t command, uint32_t* out_value, uint32_t value, const is_device_usb_device* device_desc) {
+	uint32_t out_buf = to_le(value);
+	uint32_t in_buf = 0;
+	int ret = SendReadWriteCommand(handlers, command, (uint8_t*)&out_buf, sizeof(uint32_t), (uint8_t*)&in_buf, sizeof(uint32_t), device_desc);
+	*out_value = from_le(in_buf);
+	return ret;
+}
+
 static int AuthCtrlIn(is_device_device_handlers* handlers, const is_device_usb_device* device_desc) {
 	int ret = 0;
 	bool b_ret = true;
@@ -726,7 +750,7 @@ static int AuthCtrlIn(is_device_device_handlers* handlers, const is_device_usb_d
 	}
 }
 
-int GetDeviceSerial(is_device_device_handlers* handlers, uint8_t* buf, const is_device_usb_device* device_desc) {
+int GetIsDeviceSerial(is_device_device_handlers* handlers, uint8_t* buf, const is_device_usb_device* device_desc) {
 	int ret = 0;
 	uint32_t value = 0;
 	switch(device_desc->device_type) {
@@ -788,9 +812,9 @@ int WriteNecMem(is_device_device_handlers* handlers, uint32_t address, uint8_t u
 	header.count = count;
 	header.address = address;
 	fix_endianness_header(&header);
-	for(int i = 0; i < sizeof(is_nitro_nec_packet_header); i++)
+	for(size_t i = 0; i < sizeof(is_nitro_nec_packet_header); i++)
 		buffer[i] = ((uint8_t*)&header)[i];
-	for(int i = 0; i < count * unit_size; i++)
+	for(int i = 0; i < (count * unit_size); i++)
 		buffer[i + sizeof(is_nitro_nec_packet_header)] = buf[i];
 	int ret = SendWriteCommand(handlers, header.command, buffer, (count * unit_size) + sizeof(is_nitro_nec_packet_header), device_desc);
 	delete []buffer;
@@ -1076,6 +1100,8 @@ int ResetCPUStart(is_device_device_handlers* handlers, const is_device_usb_devic
 			return ResetCPUEmulatorGeneral(handlers, true, device_desc);
 		case IS_NITRO_CAPTURE_DEVICE:
 			return SendWriteCommand(handlers, IS_NITRO_CAP_CMD_SET_RESET_CPU_ON, NULL, 0, device_desc);
+		case IS_TWL_CAPTURE_DEVICE:
+			return SendWriteCommandU32(handlers, IS_TWL_CAP_CMD_POWER_ON_OFF, 0x00070000 | IS_TWL_CAP_CMD_POWER_ON_OFF, device_desc);
 		default:
 			return 0;
 	}
@@ -1087,6 +1113,8 @@ int ResetCPUEnd(is_device_device_handlers* handlers, const is_device_usb_device*
 			return ResetCPUEmulatorGeneral(handlers, false, device_desc);
 		case IS_NITRO_CAPTURE_DEVICE:
 			return SendWriteCommand(handlers, IS_NITRO_CAP_CMD_SET_RESET_CPU_OFF, NULL, 0, device_desc);
+		case IS_TWL_CAPTURE_DEVICE:
+			return SendWriteCommandU32(handlers, IS_TWL_CAP_CMD_POWER_ON_OFF, 0x00000000 | IS_TWL_CAP_CMD_POWER_ON_OFF, device_desc);
 		default:
 			return 0;
 	}
@@ -1101,6 +1129,68 @@ int ResetFullHardware(is_device_device_handlers* handlers, const is_device_usb_d
 			return SendWriteCommand(handlers, IS_NITRO_CAP_CMD_SET_RESTART_FULL, NULL, 0, device_desc);
 		default:
 			return 0;
+	}
+}
+
+int SetBatteryPercentage(is_device_device_handlers* handlers, const is_device_usb_device* device_desc, int percentage) {
+	int ret = 0;
+	uint32_t out = 0;
+	if(percentage < 1)
+		percentage = 1;
+	if(percentage > 100)
+		percentage = 100;
+	switch(device_desc->device_type) {
+		case IS_TWL_CAPTURE_DEVICE:
+			// Careful - 1 resets the DSi continuously (but the official software uses it), so...
+			ret = SendReadWriteCommandU32(handlers, IS_TWL_CAP_CMD_SET_BATTERY_PERCENTAGE, &out, (percentage << 8) | IS_TWL_CAP_CMD_SET_BATTERY_PERCENTAGE, device_desc);
+			if(out != 1)
+				return -1;
+			return ret;
+		default:
+			return ret;
+	}
+}
+
+int SetACAdapterConnected(is_device_device_handlers* handlers, const is_device_usb_device* device_desc, bool connected) {
+	int ret = 0;
+	uint32_t out = 0;
+	int value = connected ? 1 : 0;
+	switch(device_desc->device_type) {
+		case IS_TWL_CAPTURE_DEVICE:
+			ret = SendReadWriteCommandU32(handlers, IS_TWL_CAP_CMD_SET_AC_ADAPTER_ON_OFF, &out, (value << 8) | IS_TWL_CAP_CMD_SET_AC_ADAPTER_ON_OFF, device_desc);
+			if(out != 1)
+				return -1;
+			return ret;
+		default:
+			return ret;
+	}
+}
+
+int GetBatteryPercentageValues(is_device_device_handlers* handlers, const is_device_usb_device* device_desc, int* percentage_one, int* percentage_two) {
+	int ret = 0;
+	uint32_t out = 0;
+	switch(device_desc->device_type) {
+		case IS_TWL_CAPTURE_DEVICE:
+			ret = SendReadCommandU32(handlers, IS_TWL_CAP_CMD_GET_BATTERY_PERCENTAGE, &out, device_desc);
+			*percentage_one = out & 0xFF;
+			*percentage_two = (out >> 8) & 0xFF;
+			return ret;
+		default:
+			return ret;
+	}
+}
+
+int GetACAdapterConnectedValues(is_device_device_handlers* handlers, const is_device_usb_device* device_desc, bool* connected_one, bool* connected_two) {
+	int ret = 0;
+	uint32_t out = 0;
+	switch(device_desc->device_type) {
+		case IS_TWL_CAPTURE_DEVICE:
+			ret = SendReadCommandU32(handlers, IS_TWL_CAP_CMD_GET_AC_ADAPTER_ON_OFF, &out, device_desc);
+			*connected_one = (out & 0xFF) ? true : false;
+			*connected_two = ((out >> 8) & 0xFF) ? true : false;
+			return ret;
+		default:
+			return ret;
 	}
 }
 
@@ -1147,6 +1237,8 @@ int ReadFrame(is_device_device_handlers* handlers, uint8_t* buf, uint32_t addres
 int ReadFrame(is_device_device_handlers* handlers, uint8_t* buf, int length, const is_device_usb_device* device_desc) {
 	// Maybe making this async would be better for lower end hardware...
 	int num_bytes = 0;
+	if(length == 0)
+		return 0;
 	int ret = bulk_in(handlers, device_desc, buf, length, &num_bytes);
 	if(num_bytes != length)
 		return LIBUSB_ERROR_INTERRUPTED;
@@ -1226,12 +1318,12 @@ int PrepareEncDecTable(is_device_device_handlers* handlers, is_device_twl_enc_de
 
 void SetupISDeviceAsyncThread(is_device_device_handlers* handlers, void* user_data, std::thread* thread_ptr, bool* keep_going, ConsumerMutex* is_data_ready) {
 	if(handlers->usb_handle)
-		return is_device_libusb_start_thread(thread_ptr, keep_going);
+		return libusb_register_to_event_thread();
 	return is_device_is_driver_start_thread(thread_ptr, keep_going, (ISDeviceCaptureReceivedData*)user_data, handlers, is_data_ready);
 }
 
 void EndISDeviceAsyncThread(is_device_device_handlers* handlers, void* user_data, std::thread* thread_ptr, bool* keep_going, ConsumerMutex* is_data_ready) {
 	if(handlers->usb_handle)
-		return is_device_libusb_close_thread(thread_ptr, keep_going);
+		return libusb_unregister_from_event_thread();
 	return is_device_is_driver_close_thread(thread_ptr, keep_going, (ISDeviceCaptureReceivedData*)user_data);
 }

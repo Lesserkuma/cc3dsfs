@@ -21,7 +21,7 @@ enum RotationMenuOutAction{
 
 class RotationMenu : public OptionSelectionMenu {
 public:
-	RotationMenu(bool font_load_success, sf::Font &text_font);
+	RotationMenu(TextRectanglePool* text_pool);
 	~RotationMenu();
 	void prepare(float scaling_factor, int view_size_x, int view_size_y, ScreenInfo *info);
 	void insert_data();
@@ -30,11 +30,11 @@ public:
 protected:
 	bool is_option_inc_dec(int index);
 	void set_output_option(int index, int action);
-	int get_num_options();
+	size_t get_num_options();
 	std::string get_string_option(int index, int action);
 	void class_setup();
 private:
 	int *options_indexes;
-	int num_enabled_options;
+	size_t num_enabled_options;
 };
 #endif

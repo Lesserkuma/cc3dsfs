@@ -1,4 +1,7 @@
 #include "ExtraButtons.hpp"
+#include "utils.hpp"
+
+#define NUM_PI_BUTTONS (sizeof(pi_buttons) / sizeof(pi_buttons[0]))
 
 static ExtraButton pi_page_up, pi_page_down, pi_enter, pi_power;
 static ExtraButton* pi_buttons[] = {&pi_page_up, &pi_page_down, &pi_enter, &pi_power};
@@ -23,9 +26,9 @@ void ExtraButton::initialize(int id, sf::Keyboard::Key corresponding_key, bool i
 		this->gpioline_ptr = NULL;
 	if(this->gpioline_ptr) {
 		if(use_pud_up)
-			gpiod_line_request_input_flags(this->gpioline_ptr, "cc3dsfs", GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP);
+			gpiod_line_request_input_flags(this->gpioline_ptr, NAME, GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP);
 		else
-			gpiod_line_request_input_flags(this->gpioline_ptr, "cc3dsfs", GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_DOWN);
+			gpiod_line_request_input_flags(this->gpioline_ptr, NAME, GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_DOWN);
 	}
 	#endif
 }
@@ -95,21 +98,21 @@ void ExtraButton::poll(std::queue<SFEvent> &events_queue) {
 	}
 	else
 		this->started = false;
-	events_queue.emplace(pressed, this->corresponding_key, this->is_power, true);
+	events_queue.emplace(pressed, this->corresponding_key, false, false, false, false, this->is_power, true);
 }
 
 std::string get_extra_button_name(sf::Keyboard::Key corresponding_key) {
-	for(int i = 0; i < sizeof(pi_buttons) / sizeof(pi_buttons[0]); i++)
+	for(size_t i = 0; i < NUM_PI_BUTTONS; i++)
 		if(pi_buttons[i]->is_button_x(corresponding_key))
 			return pi_buttons[i]->get_name();
 	return "";
 }
 
 void init_extra_buttons_poll(int page_up_id, int page_down_id, int enter_id, int power_id, bool use_pud_up) {
-	pi_page_up.initialize(page_up_id, sf::Keyboard::Key::PageUp, false, 0.5, 0.03, use_pud_up, "Select");
-	pi_page_down.initialize(page_down_id, sf::Keyboard::Key::PageDown, false, 0.5, 0.03, use_pud_up, "Menu");
-	pi_enter.initialize(enter_id, sf::Keyboard::Key::Enter, false, 0.5, 0.075, use_pud_up, "Enter");
-	pi_power.initialize(power_id, sf::Keyboard::Key::Escape, true, 30.0, 30.0, use_pud_up, "Power");
+	pi_page_up.initialize(page_up_id, sf::Keyboard::Key::PageUp, false, 0.5f, 0.03f, use_pud_up, "Select");
+	pi_page_down.initialize(page_down_id, sf::Keyboard::Key::PageDown, false, 0.5f, 0.03f, use_pud_up, "Menu");
+	pi_enter.initialize(enter_id, sf::Keyboard::Key::Enter, false, 0.5f, 0.075f, use_pud_up, "Enter");
+	pi_power.initialize(power_id, sf::Keyboard::Key::Escape, true, 30.0f, 30.0f, use_pud_up, "Power");
 }
 
 bool are_extra_buttons_usable() {
@@ -117,11 +120,11 @@ bool are_extra_buttons_usable() {
 }
 
 void end_extra_buttons_poll() {
-	for(int i = 0; i < sizeof(pi_buttons) / sizeof(pi_buttons[0]); i++)
+	for(size_t i = 0; i < NUM_PI_BUTTONS; i++)
 		pi_buttons[i]->end();
 }
 
 void extra_buttons_poll(std::queue<SFEvent> &events_queue) {
-	for(int i = 0; i < sizeof(pi_buttons) / sizeof(pi_buttons[0]); i++)
+	for(size_t i = 0; i < NUM_PI_BUTTONS; i++)
 		pi_buttons[i]->poll(events_queue);
 }

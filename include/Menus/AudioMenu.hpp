@@ -19,11 +19,15 @@ enum AudioMenuOutAction{
 	AUDIO_MENU_OUTPUT_DEC,
 	AUDIO_MENU_OUTPUT_INC,
 	AUDIO_MENU_RESTART,
+	AUDIO_MENU_CHANGE_DEVICE,
+	AUDIO_MENU_MODE_DEC,
+	AUDIO_MENU_MODE_INC,
+	AUDIO_MENU_AUTO_SCAN,
 };
 
 class AudioMenu : public OptionSelectionMenu {
 public:
-	AudioMenu(bool font_load_success, sf::Font &text_font);
+	AudioMenu(TextRectanglePool* text_pool);
 	~AudioMenu();
 	void prepare(float scaling_factor, int view_size_x, int view_size_y, AudioData *audio_data);
 	void insert_data();
@@ -32,11 +36,11 @@ public:
 protected:
 	bool is_option_inc_dec(int index);
 	void set_output_option(int index, int action);
-	int get_num_options();
+	size_t get_num_options();
 	std::string get_string_option(int index, int action);
 	void class_setup();
 private:
 	int *options_indexes;
-	int num_enabled_options;
+	size_t num_enabled_options;
 };
 #endif

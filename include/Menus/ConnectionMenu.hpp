@@ -9,7 +9,7 @@
 
 class ConnectionMenu : public OptionSelectionMenu {
 public:
-	ConnectionMenu(bool font_load_success, sf::Font &text_font);
+	ConnectionMenu(TextRectanglePool* text_pool);
 	~ConnectionMenu();
 	void prepare(float scaling_factor, int view_size_x, int view_size_y);
 	void insert_data(std::vector<CaptureDevice> *devices_list);
@@ -17,7 +17,7 @@ public:
 	void reset_output_option();
 protected:
 	void set_output_option(int index, int action);
-	int get_num_options();
+	size_t get_num_options();
 	std::string get_string_option(int index, int action);
 	void class_setup();
 private:

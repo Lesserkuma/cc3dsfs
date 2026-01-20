@@ -13,7 +13,7 @@
 
 class ShortcutMenu : public OptionSelectionMenu {
 public:
-	ShortcutMenu(bool font_load_success, sf::Font &text_font);
+	ShortcutMenu(TextRectanglePool* text_pool);
 	~ShortcutMenu();
 	void prepare(float scaling_factor, int view_size_x, int view_size_y);
 	void insert_data(std::vector<std::string> &shortcut_names);
@@ -21,7 +21,7 @@ public:
 	void reset_output_option();
 protected:
 	void set_output_option(int index, int action);
-	int get_num_options();
+	size_t get_num_options();
 	std::string get_string_option(int index, int action);
 	void class_setup();
 private:

@@ -24,14 +24,20 @@ static const VideoEffectsMenuOptionInfo frame_blending_option = {
 .is_inc = true, .dec_str = "<", .inc_str = ">", .inc_out_action = VIDEO_EFFECTS_MENU_FRAME_BLENDING_INC,
 .out_action = VIDEO_EFFECTS_MENU_FRAME_BLENDING_DEC};
 
+static const VideoEffectsMenuOptionInfo color_correction_menu_option = {
+.base_name = "Color Correction", .false_name = "", .is_selectable = true,
+.is_inc = false, .dec_str = "", .inc_str = "", .inc_out_action = VIDEO_EFFECTS_MENU_NO_ACTION,
+.out_action = VIDEO_EFFECTS_MENU_COLOR_CORRECTION_MENU};
+
 static const VideoEffectsMenuOptionInfo* pollable_options[] = {
 &input_colorspace_option,
 &frame_blending_option,
+&color_correction_menu_option,
 };
 
-VideoEffectsMenu::VideoEffectsMenu(bool font_load_success, sf::Font &text_font) : OptionSelectionMenu(){
+VideoEffectsMenu::VideoEffectsMenu(TextRectanglePool* text_rectangle_pool) : OptionSelectionMenu(){
 	this->options_indexes = new int[NUM_TOTAL_MENU_OPTIONS];
-	this->initialize(font_load_success, text_font);
+	this->initialize(text_rectangle_pool);
 	this->num_enabled_options = 0;
 }
 
@@ -46,8 +52,8 @@ void VideoEffectsMenu::class_setup() {
 	this->width_divisor_menu = 9;
 	this->base_height_factor_menu = 12;
 	this->base_height_divisor_menu = 6;
-	this->min_text_size = 0.3;
-	this->max_width_slack = 1.1;
+	this->min_text_size = 0.3f;
+	this->max_width_slack = 1.1f;
 	this->menu_color = sf::Color(30, 30, 60, 192);
 	this->title = "Video Effects Settings";
 	this->show_back_x = true;
@@ -57,8 +63,8 @@ void VideoEffectsMenu::class_setup() {
 
 void VideoEffectsMenu::insert_data() {
 	this->num_enabled_options = 0;
-	for(int i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
-		this->options_indexes[this->num_enabled_options] = i;
+	for(size_t i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
+		this->options_indexes[this->num_enabled_options] = (int)i;
 		this->num_enabled_options++;
 	}
 	this->prepare_options();
@@ -77,7 +83,7 @@ void VideoEffectsMenu::set_output_option(int index, int action) {
 		this->selected_index = pollable_options[this->options_indexes[index]]->out_action;
 }
 
-int VideoEffectsMenu::get_num_options() {
+size_t VideoEffectsMenu::get_num_options() {
 	return this->num_enabled_options;
 }
 

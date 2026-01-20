@@ -1,24 +1,54 @@
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "Build archs for Mac OS X" FORCE)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum OS X deployment version")
+set(CMAKE_PARALLEL_MSVC FALSE CACHE BOOL "Enables parallel compilation with MSVC")
+
+#Workaround due to cmake parallel being broken, and needing to set these
+#flags before the project is defined...
+if(${CMAKE_PARALLEL_MSVC})
+	message("Parallel build MSVC configuration")
+	set(CMAKE_C_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} /MP")
+	set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} /MP")
+endif()
+
+macro(add_compile_flag compile_flag)
+	if(MSVC)
+		list(APPEND EXTRA_CXX_FLAGS "/D${compile_flag}")
+	else()
+		list(APPEND EXTRA_CXX_FLAGS "-D${compile_flag}")
+	endif()
+endmacro()
+
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 set(TARGET_LANGUAGES CXX C)
 project(cc3dsfs VERSION 1.0.0 LANGUAGES ${TARGET_LANGUAGES})
 include(ExternalProject)
 
+if((${CMAKE_PARALLEL_MSVC}) AND (NOT (MSVC)))
+	message(FATAL_ERROR "Parallel build option specific to MSVC used with wrong compiler!")
+endif()
+
 set(N3DSXL_LOOPY_SUPPORT 1)
 set(NEW_DS_LOOPY_SUPPORT 1)
 set(IS_DEVICES_SUPPORT 1)
 set(OLD_DS_3DS_LOOPY_SUPPORT 1)
+set(CYPRESS_NISETRO_SUPPORT 1)
+set(OPTIMIZE_3DS_SUPPORT 1)
+set(PARTNER_CTR_SUPPORT 1)
 
 set(USE_FTD2XX_FOR_NEW_DS_LOOPY ${NEW_DS_LOOPY_SUPPORT})
-set(USE_LIBFTDI_FOR_NEW_DS_LOOPY ${NEW_DS_LOOPY_SUPPORT})
-set(USE_LIBUSB_SUPPORT ${IS_DEVICES_SUPPORT} OR ${OLD_DS_3DS_LOOPY_SUPPORT} OR ${USE_LIBFTDI_FOR_NEW_DS_LOOPY})
+set(USE_LIBUSB_FOR_NEW_DS_LOOPY ${NEW_DS_LOOPY_SUPPORT})
+set(USE_FTD3XX_FOR_N3DSXL_LOOPY ${N3DSXL_LOOPY_SUPPORT})
+set(USE_LIBUSB_FOR_N3DSXL_LOOPY ${N3DSXL_LOOPY_SUPPORT})
+set(USE_CYPRESS_USB_SUPPORT ${CYPRESS_NISETRO_SUPPORT} OR ${OPTIMIZE_3DS_SUPPORT} OR ${PARTNER_CTR_SUPPORT})
+set(USE_LIBUSB_SUPPORT ${IS_DEVICES_SUPPORT} OR ${OLD_DS_3DS_LOOPY_SUPPORT} OR ${USE_LIBUSB_FOR_NEW_DS_LOOPY} OR ${USE_LIBUSB_FOR_N3DSXL_LOOPY} OR ${USE_CYPRESS_USB_SUPPORT})
 if(NOT (${CMAKE_SYSTEM_NAME} STREQUAL "Windows"))
 	#Performance outside of Windows is very bad for the official drivers...
 	set(USE_FTD2XX_FOR_NEW_DS_LOOPY 0)
+	#Availability issues and various bugs, forcing the use of an older release...
+	#Just avoid using it, when possible...
+	set(USE_FTD3XX_FOR_N3DSXL_LOOPY 0)
 endif()
-set(FTDI_EEPROM OFF)
 set(WINDOWS_ARM64 0)
 set(WINDOWS_x86_32 0)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
@@ -26,6 +56,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 set(SFML_USE_STATIC_STD_LIBS TRUE)
+set(SFML_CLONE_USE_GIT_SHALLOW FALSE)
 set(CMAKE_HOST_CXX_COMPILER ${CMAKE_CXX_COMPILER} CACHE STRING "Host Compiler")
 if(FORCE_WINDOWS_FTD3XX_SHARED_LIB)
 	set(WINDOWS_FTD3XX_USE_SHARED_LIB 1)
@@ -39,7 +70,19 @@ else()
 endif()
 set(FETCHCONTENT_QUIET FALSE)
 set(EXTRA_CXX_FLAGS "")
+if(MSVC)
+	list(APPEND EXTRA_CXX_FLAGS "/W3")
+else()
+	list(APPEND EXTRA_CXX_FLAGS "-Wall")
+	list(APPEND EXTRA_CXX_FLAGS "-Wextra")
+	list(APPEND EXTRA_CXX_FLAGS "-Wno-unused")
+	list(APPEND EXTRA_CXX_FLAGS "-Wno-unused-parameter")
+	list(APPEND EXTRA_CXX_FLAGS "-Wno-ignored-qualifiers")
+	list(APPEND EXTRA_CXX_FLAGS "-Wno-missing-field-initializers")
+endif()
+
 set(RASPBERRY_PI_COMPILATION FALSE CACHE BOOL "Option for compiling the Raspberry Pi GPIO library in")
+set(SFML_USE_DRM FALSE CACHE BOOL "Option for compiling SFML for DRM on Linux")
 set(SFML_BUILD_NETWORK FALSE)
 set(EXTRA_LIBRARIES "")
 if(MINGW_CROSS_COMPILATION)
@@ -53,11 +96,7 @@ set(SCRIPT_EXTENSION "")
 
 if (RASPBERRY_PI_COMPILATION)
 	list(APPEND EXTRA_LIBRARIES gpiod)
-	if(MSVC)
-		list(APPEND EXTRA_CXX_FLAGS "/DRASPI 1")
-	else()
-		list(APPEND EXTRA_CXX_FLAGS "-DRASPI 1")
-	endif()
+	add_compile_flag("RASPI 1")
 endif()
 
 if((${CMAKE_SYSTEM_NAME} STREQUAL "Windows") AND ((${CMAKE_GENERATOR_PLATFORM} MATCHES "ARM64") OR (("${CMAKE_GENERATOR_PLATFORM}" STREQUAL "") AND (${CMAKE_SYSTEM_PROCESSOR} MATCHES "ARM64"))))
@@ -74,22 +113,24 @@ if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
 endif()
 
 include(FetchContent)
-FetchContent_Declare(SFML
-	GIT_REPOSITORY https://github.com/SFML/SFML.git
-	GIT_TAG master
-	GIT_SHALLOW ON)
+# Git shallow clone isn't shallow in cmake... This is bad. :/
+# Replace this if they ever fix it.
+if(SFML_CLONE_USE_GIT_SHALLOW)
+	FetchContent_Declare(SFML
+		GIT_REPOSITORY https://github.com/SFML/SFML.git
+		GIT_TAG master
+		GIT_SHALLOW ON)
+else()
+	FetchContent_Declare(SFML
+		URL https://github.com/SFML/SFML/archive/refs/heads/master.zip
+	)
+endif()
 
 if(USE_LIBUSB_SUPPORT)
 	FetchContent_Declare(LibUSB
 		GIT_REPOSITORY https://github.com/libusb/libusb-cmake.git
 		GIT_TAG main
 		OVERRIDE_FIND_PACKAGE)
-endif()
-
-if(USE_LIBFTDI_FOR_NEW_DS_LOOPY)
-	FetchContent_Declare(libftdi1
-		GIT_REPOSITORY git://developer.intra2net.com/libftdi
-		)
 endif()
 
 if(${CMAKE_HOST_SYSTEM_NAME} STREQUAL "Windows")
@@ -102,15 +143,15 @@ endif()
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
 	set(FINAL_EXTENSION ".exe")
 elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Android")
 else()
-	if(MSVC)
-		list(APPEND EXTRA_CXX_FLAGS "/DXLIB_BASED 1")
-	else()
-		list(APPEND EXTRA_CXX_FLAGS "-DXLIB_BASED 1")
+	if(NOT ${SFML_USE_DRM})
+		add_compile_flag("XLIB_BASED 1")
 	endif()
 endif()
 
-set(FTD3XX_BASE_URL https://ftdichip.com/wp-content/uploads/)
+set(FTDI_BASE_URL file://${CMAKE_SOURCE_DIR}/ftdi_lib_files/)
+set(FTD3XX_BASE_URL ${FTDI_BASE_URL})
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
 	set(FTD3XX_BUILD_COMMAND ${SETUP_SCRIPTS_DIR}/windows_setup_ftd3xx)
 	set(FTD3XX_URL_TIME 2024/01)
@@ -179,7 +220,7 @@ else()
 	set(FTD3XX_SUBFOLDER linux)
 endif()
 
-set(FTD2XX_BASE_URL https://ftdichip.com/wp-content/uploads/)
+set(FTD2XX_BASE_URL ${FTDI_BASE_URL})
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
 	set(FTD2XX_BUILD_COMMAND ${SETUP_SCRIPTS_DIR}/windows_setup_ftd2xx)
 	set(FTD2XX_URL_TIME 2023/09)
@@ -258,29 +299,29 @@ else()
 endif()
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
-if(N3DSXL_LOOPY_SUPPORT)
-	FetchContent_Declare(FTD3XX
-		URL ${FTD3XX_BASE_URL}${FTD3XX_URL_TIME}/${FTD3XX_ARCHIVE}
-		DOWNLOAD_NO_EXTRACT TRUE
-	)
-endif()
-if(USE_FTD2XX_FOR_NEW_DS_LOOPY)
-	FetchContent_Declare(FTD2XX
-		URL ${FTD2XX_BASE_URL}${FTD2XX_URL_TIME}/${FTD2XX_ARCHIVE}
-		DOWNLOAD_NO_EXTRACT TRUE
-	)
-endif()
+	if(USE_FTD3XX_FOR_N3DSXL_LOOPY)
+		FetchContent_Declare(FTD3XX
+			URL ${FTD3XX_BASE_URL}${FTD3XX_URL_TIME}/${FTD3XX_ARCHIVE}
+			DOWNLOAD_NO_EXTRACT TRUE
+		)
+	endif()
+	if(USE_FTD2XX_FOR_NEW_DS_LOOPY)
+		FetchContent_Declare(FTD2XX
+			URL ${FTD2XX_BASE_URL}${FTD2XX_URL_TIME}/${FTD2XX_ARCHIVE}
+			DOWNLOAD_NO_EXTRACT TRUE
+		)
+	endif()
 else()
-if(N3DSXL_LOOPY_SUPPORT)
-	FetchContent_Declare(FTD3XX
-		URL ${FTD3XX_BASE_URL}${FTD3XX_URL_TIME}/${FTD3XX_ARCHIVE}
-	)
-endif()
-if(USE_FTD2XX_FOR_NEW_DS_LOOPY)
-	FetchContent_Declare(FTD2XX
-		URL ${FTD2XX_BASE_URL}${FTD2XX_URL_TIME}/${FTD2XX_ARCHIVE}
-	)
-endif()
+	if(USE_FTD3XX_FOR_N3DSXL_LOOPY)
+		FetchContent_Declare(FTD3XX
+			URL ${FTD3XX_BASE_URL}${FTD3XX_URL_TIME}/${FTD3XX_ARCHIVE}
+		)
+	endif()
+	if(USE_FTD2XX_FOR_NEW_DS_LOOPY)
+		FetchContent_Declare(FTD2XX
+			URL ${FTD2XX_BASE_URL}${FTD2XX_URL_TIME}/${FTD2XX_ARCHIVE}
+		)
+	endif()
 endif()
 
 set(TOOLS_DATA_DIR ${CMAKE_BINARY_DIR}/tools_and_data)
@@ -293,83 +334,95 @@ set(EXTRA_DEPENDENCIES "")
 set(SOURCE_CPP_DEVICE_FILES_BASE_PATH "source/CaptureDeviceSpecific")
 set(SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH "${SOURCE_CPP_DEVICE_FILES_BASE_PATH}/ISDevices")
 set(SOURCE_CPP_FTD2_FILES_BASE_PATH "${SOURCE_CPP_DEVICE_FILES_BASE_PATH}/DSCapture_FTD2")
+set(SOURCE_CPP_FTD3_FILES_BASE_PATH "${SOURCE_CPP_DEVICE_FILES_BASE_PATH}/3DSCapture_FTD3")
+set(SOURCE_CPP_CYPRESS_USB_FILES_BASE_PATH "${SOURCE_CPP_DEVICE_FILES_BASE_PATH}/CypressShared")
+set(SOURCE_CPP_CYPRESS_NISETRO_DEVICES_FILES_BASE_PATH "${SOURCE_CPP_DEVICE_FILES_BASE_PATH}/Nisetro")
+set(SOURCE_CPP_CYPRESS_OPTIMIZE_3DS_FILES_BASE_PATH "${SOURCE_CPP_DEVICE_FILES_BASE_PATH}/Optimize_3DS")
+set(SOURCE_CPP_PARTNER_CTR_FILES_BASE_PATH "${SOURCE_CPP_DEVICE_FILES_BASE_PATH}/Partner_CTR")
 if(N3DSXL_LOOPY_SUPPORT)
+	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_FTD3_FILES_BASE_PATH}/3dscapture_ftd3_shared.cpp ${SOURCE_CPP_FTD3_FILES_BASE_PATH}/3dscapture_ftd3_compatibility.cpp)
+	add_compile_flag("USE_FTD3")
+endif()
+if(USE_FTD3XX_FOR_N3DSXL_LOOPY)
+	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_FTD3_FILES_BASE_PATH}/3dscapture_ftd3_driver_comms.cpp ${SOURCE_CPP_FTD3_FILES_BASE_PATH}/3dscapture_ftd3_driver_acquisition.cpp)
 	list(APPEND FETCH_CONTENT_MAKE_AVAILABLE_LIBRARIES FTD3XX)
-	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_DEVICE_FILES_BASE_PATH}/3dscapture_ftd3.cpp)
 	list(APPEND EXTRA_DEPENDENCIES FTD3XX_BUILD_PROJECT)
-	if(MSVC)
-		list(APPEND EXTRA_CXX_FLAGS "/DUSE_FTD3")
-	else()
-		list(APPEND EXTRA_CXX_FLAGS "-DUSE_FTD3")
-	endif()
+	add_compile_flag("USE_FTD3XX")
+endif()
+if(USE_LIBUSB_FOR_N3DSXL_LOOPY)
+	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_FTD3_FILES_BASE_PATH}/3dscapture_ftd3_libusb_comms.cpp ${SOURCE_CPP_FTD3_FILES_BASE_PATH}/3dscapture_ftd3_libusb_acquisition.cpp)
+	add_compile_flag("USE_FTD3_LIBUSB")
 endif()
 if(USE_LIBUSB_SUPPORT)
 	list(APPEND FETCH_CONTENT_MAKE_AVAILABLE_LIBRARIES LibUSB)
 	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_DEVICE_FILES_BASE_PATH}/usb_generic.cpp)
-	if(MSVC)
-		list(APPEND EXTRA_CXX_FLAGS "/DUSE_LIBUSB")
-	else()
-		list(APPEND EXTRA_CXX_FLAGS "-DUSE_LIBUSB")
-	endif()
+	add_compile_flag("USE_LIBUSB")
 endif()
 if(IS_DEVICES_SUPPORT)
-	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_device_communications.cpp ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_device_acquisition.cpp ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_nitro_acquisition_capture.cpp ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_twl_acquisition_capture.cpp ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_nitro_acquisition_emulator.cpp ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_device_is_driver.cpp ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_device_libusb.cpp ${TOOLS_DATA_DIR}/is_twl_cap_crc32_table.cpp ${TOOLS_DATA_DIR}/is_twl_cap_init_seed_table.cpp)
-	if(MSVC)
-		list(APPEND EXTRA_CXX_FLAGS "/DUSE_IS_DEVICES_USB")
-	else()
-		list(APPEND EXTRA_CXX_FLAGS "-DUSE_IS_DEVICES_USB")
-	endif()
+	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_device_communications.cpp ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_device_acquisition.cpp ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_nitro_acquisition_capture.cpp ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_twl_acquisition_capture.cpp ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_nitro_acquisition_emulator.cpp ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_device_is_driver.cpp ${SOURCE_CPP_IS_DEVICES_FILES_BASE_PATH}/usb_is_device_libusb.cpp ${TOOLS_DATA_DIR}/ccitt32_crc32_table.cpp ${TOOLS_DATA_DIR}/is_twl_cap_init_seed_table.cpp)
+	add_compile_flag("USE_IS_DEVICES_USB")
 endif()
 if(OLD_DS_3DS_LOOPY_SUPPORT)
 	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_DEVICE_FILES_BASE_PATH}/usb_ds_3ds_capture.cpp)
-	if(MSVC)
-		list(APPEND EXTRA_CXX_FLAGS "/DUSE_DS_3DS_USB")
-	else()
-		list(APPEND EXTRA_CXX_FLAGS "-DUSE_DS_3DS_USB")
-	endif()
+	add_compile_flag("USE_DS_3DS_USB")
+endif()
+if(USE_CYPRESS_USB_SUPPORT)
+	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_CYPRESS_USB_FILES_BASE_PATH}/cypress_shared_driver_comms.cpp ${SOURCE_CPP_CYPRESS_USB_FILES_BASE_PATH}/cypress_shared_libusb_comms.cpp ${SOURCE_CPP_CYPRESS_USB_FILES_BASE_PATH}/cypress_shared_communications.cpp)
+endif()
+if(CYPRESS_NISETRO_SUPPORT)
+	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_CYPRESS_NISETRO_DEVICES_FILES_BASE_PATH}/cypress_nisetro_communications.cpp ${SOURCE_CPP_CYPRESS_NISETRO_DEVICES_FILES_BASE_PATH}/cypress_nisetro_acquisition.cpp ${TOOLS_DATA_DIR}/nisetro_ds_fw.cpp)
+	add_compile_flag("USE_CYNI_USB")
+endif()
+if(OPTIMIZE_3DS_SUPPORT)
+	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_CYPRESS_OPTIMIZE_3DS_FILES_BASE_PATH}/cypress_optimize_3ds_communications.cpp ${SOURCE_CPP_CYPRESS_OPTIMIZE_3DS_FILES_BASE_PATH}/cypress_optimize_3ds_acquisition.cpp ${TOOLS_DATA_DIR}/optimize_new_3ds_fw.cpp ${TOOLS_DATA_DIR}/optimize_new_3ds_565_fpga_pl.cpp ${TOOLS_DATA_DIR}/optimize_new_3ds_888_fpga_pl.cpp ${TOOLS_DATA_DIR}/optimize_old_3ds_fw.cpp ${TOOLS_DATA_DIR}/optimize_old_3ds_565_fpga_pl.cpp ${TOOLS_DATA_DIR}/optimize_old_3ds_888_fpga_pl.cpp ${TOOLS_DATA_DIR}/adler_crc32_table_sp.cpp ${TOOLS_DATA_DIR}/optimize_serial_key_to_byte_table.cpp)
+	add_compile_flag("USE_CYPRESS_OPTIMIZE")
+endif()
+if(PARTNER_CTR_SUPPORT)
+	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_PARTNER_CTR_FILES_BASE_PATH}/cypress_partner_ctr_communications.cpp ${SOURCE_CPP_PARTNER_CTR_FILES_BASE_PATH}/cypress_partner_ctr_acquisition.cpp)
+	add_compile_flag("USE_PARTNER_CTR")
 endif()
 if(NEW_DS_LOOPY_SUPPORT)
 	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_FTD2_FILES_BASE_PATH}/dscapture_ftd2_shared.cpp ${SOURCE_CPP_FTD2_FILES_BASE_PATH}/dscapture_ftd2_compatibility.cpp ${TOOLS_DATA_DIR}/ftd2_ds2_fw_1.cpp ${TOOLS_DATA_DIR}/ftd2_ds2_fw_2.cpp)
-	if(MSVC)
-		list(APPEND EXTRA_CXX_FLAGS "/DUSE_FTD2")
-	else()
-		list(APPEND EXTRA_CXX_FLAGS "-DUSE_FTD2")
-	endif()
+	add_compile_flag("USE_FTD2")
 endif()
-if(USE_LIBFTDI_FOR_NEW_DS_LOOPY)
-	list(APPEND FETCH_CONTENT_MAKE_AVAILABLE_LIBRARIES_SEPARATE libftdi1)
-	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_FTD2_FILES_BASE_PATH}/dscapture_libftdi2.cpp)
-	if(MSVC)
-		list(APPEND EXTRA_CXX_FLAGS "/DUSE_FTD2_LIBFTDI")
-	else()
-		list(APPEND EXTRA_CXX_FLAGS "-DUSE_FTD2_LIBFTDI")
-	endif()
+if(USE_LIBUSB_FOR_NEW_DS_LOOPY)
+	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_FTD2_FILES_BASE_PATH}/dscapture_ftd2_libusb_comms.cpp ${SOURCE_CPP_FTD2_FILES_BASE_PATH}/dscapture_ftd2_libusb_acquisition.cpp)
+	add_compile_flag("USE_FTD2_LIBUSB")
 endif()
 if(USE_FTD2XX_FOR_NEW_DS_LOOPY)
 	list(APPEND FETCH_CONTENT_MAKE_AVAILABLE_LIBRARIES FTD2XX)
-	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_FTD2_FILES_BASE_PATH}/dscapture_ftd2_driver.cpp)
+	list(APPEND SOURCE_CPP_EXTRA_FILES ${SOURCE_CPP_FTD2_FILES_BASE_PATH}/dscapture_ftd2_driver_comms.cpp ${SOURCE_CPP_FTD2_FILES_BASE_PATH}/dscapture_ftd2_driver_acquisition.cpp)
 	list(APPEND EXTRA_DEPENDENCIES FTD2XX_BUILD_PROJECT)
-	if(MSVC)
-		list(APPEND EXTRA_CXX_FLAGS "/DUSE_FTD2_DRIVER")
-	else()
-		list(APPEND EXTRA_CXX_FLAGS "-DUSE_FTD2_DRIVER")
-	endif()
+	add_compile_flag("USE_FTD2_DRIVER")
 endif()
 
-FetchContent_MakeAvailable(SFML ${FETCH_CONTENT_MAKE_AVAILABLE_LIBRARIES})
-# Find libusb
-set(LIBUSB_INCLUDE_DIR ${libusb_SOURCE_DIR}/libusb/libusb)
-FetchContent_MakeAvailable(${FETCH_CONTENT_MAKE_AVAILABLE_LIBRARIES_SEPARATE})
+if(NOT (${CMAKE_SYSTEM_NAME} STREQUAL "Android"))
+	FetchContent_MakeAvailable(SFML ${FETCH_CONTENT_MAKE_AVAILABLE_LIBRARIES})
+	# Find libusb
+	set(LIBUSB_INCLUDE_DIR ${libusb_SOURCE_DIR}/libusb/libusb)
+	FetchContent_MakeAvailable(${FETCH_CONTENT_MAKE_AVAILABLE_LIBRARIES_SEPARATE})
+else()
+	set(SFML_DIR "${CMAKE_ANDROID_NDK}/sources/third_party/sfml/lib/${CMAKE_ANDROID_ARCH_ABI}/cmake/SFML")
+	# Find SFML
+	find_package(SFML 3 REQUIRED COMPONENTS Graphics Audio Window System Main)
+	set(OLD_CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH})
+	set(CMAKE_MODULE_PATH ${SFML_DIR})
+    find_package(EGL REQUIRED)
+    find_package(GLES REQUIRED)
+	set(CMAKE_MODULE_PATH ${OLD_CMAKE_MODULE_PATH})
+	set(LIBUSB_DIR "${CMAKE_ANDROID_NDK}/sources/third_party/libusb")
+	set(LIBUSB_INCLUDE_DIR ${LIBUSB_DIR}/include/libusb)
+endif()
 
 set(EXTRA_INCLUDE_DIRECTORIES "")
-if(N3DSXL_LOOPY_SUPPORT)
+if(USE_FTD3XX_FOR_N3DSXL_LOOPY)
 	list(APPEND EXTRA_INCLUDE_DIRECTORIES ${ftd3xx_BINARY_DIR}/${FTD3XX_SUBFOLDER})
 endif()
 if(USE_FTD2XX_FOR_NEW_DS_LOOPY)
 	list(APPEND EXTRA_INCLUDE_DIRECTORIES ${ftd2xx_BINARY_DIR}/${FTD2XX_SUBFOLDER})
 endif()
 if(USE_LIBUSB_SUPPORT)
-	list(APPEND EXTRA_INCLUDE_DIRECTORIES ${libusb_SOURCE_DIR}/libusb/libusb)
+	list(APPEND EXTRA_INCLUDE_DIRECTORIES ${LIBUSB_INCLUDE_DIR})
 endif()
 
 if(IS_DIRECTORY "${sfml_SOURCE_DIR}")
@@ -382,13 +435,7 @@ if(USE_LIBUSB_SUPPORT)
 	endif()
 endif()
 
-if(USE_LIBFTDI_FOR_NEW_DS_LOOPY)
-	if(IS_DIRECTORY "${libftdi1_SOURCE_DIR}")
-		set_property(DIRECTORY ${libftdi1_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL YES)
-	endif()
-endif()
-
-if(N3DSXL_LOOPY_SUPPORT)
+if(USE_FTD3XX_FOR_N3DSXL_LOOPY)
 	file(MAKE_DIRECTORY ${ftd3xx_BINARY_DIR}/win)
 	file(MAKE_DIRECTORY ${ftd3xx_BINARY_DIR}/macos)
 	file(MAKE_DIRECTORY ${ftd3xx_BINARY_DIR}/linux)
@@ -417,7 +464,7 @@ else()
 	set(FTD2XX_BUILD_COMMAND_PARAMETERS ${ftd2xx_SOURCE_DIR} ${ftd2xx_BINARY_DIR}/${FTD2XX_SUBFOLDER} build/${FTD2XX_LIB})
 endif()
 
-if(N3DSXL_LOOPY_SUPPORT)
+if(USE_FTD3XX_FOR_N3DSXL_LOOPY)
 	ExternalProject_Add(FTD3XX_BUILD_PROJECT
 		SOURCE_DIR ${ftd3xx_SOURCE_DIR}
 		BINARY_DIR ${ftd3xx_BINARY_DIR}
@@ -464,7 +511,6 @@ if(USE_FTD2XX_FOR_NEW_DS_LOOPY)
 endif()
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-
 # search headers and libraries in the target environment
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
@@ -475,38 +521,66 @@ execute_process(COMMAND ${CMAKE_COMMAND} --build ${TOOLS_DATA_DIR})
 set(OUTPUT_NAME cc3dsfs)
 
 if(MSVC)
-	set_source_files_properties(source/conversions.cpp PROPERTIES COMPILE_OPTIONS "/O2")
+	set_source_files_properties(source/conversions.cpp PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Release>:/O2>")
 else()
-	set_source_files_properties(source/conversions.cpp PROPERTIES COMPILE_OPTIONS "-O3")
+	set_source_files_properties(source/conversions.cpp PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Release>:-O3;-funroll-loops>")
 endif()
-add_executable(${OUTPUT_NAME} source/cc3dsfs.cpp source/utils.cpp source/audio_data.cpp source/audio.cpp source/frontend.cpp source/TextRectangle.cpp source/WindowScreen.cpp source/WindowScreen_Menu.cpp source/devicecapture.cpp source/conversions.cpp source/ExtraButtons.cpp source/Menus/ConnectionMenu.cpp source/Menus/OptionSelectionMenu.cpp source/Menus/MainMenu.cpp source/Menus/VideoMenu.cpp source/Menus/CropMenu.cpp source/Menus/PARMenu.cpp source/Menus/RotationMenu.cpp source/Menus/OffsetMenu.cpp source/Menus/AudioMenu.cpp source/Menus/BFIMenu.cpp source/Menus/RelativePositionMenu.cpp source/Menus/ResolutionMenu.cpp source/Menus/FileConfigMenu.cpp source/Menus/ExtraSettingsMenu.cpp source/Menus/StatusMenu.cpp source/Menus/LicenseMenu.cpp source/WindowCommands.cpp source/Menus/ShortcutMenu.cpp source/Menus/ActionSelectionMenu.cpp source/Menus/ScalingRatioMenu.cpp source/Menus/ISNitroMenu.cpp source/Menus/VideoEffectsMenu.cpp source/CaptureDataBuffers.cpp source/Menus/InputMenu.cpp ${TOOLS_DATA_DIR}/font_ttf.cpp ${TOOLS_DATA_DIR}/shaders_list.cpp ${SOURCE_CPP_EXTRA_FILES})
 
+set(EXECUTABLE_SOURCE_FILES source/cc3dsfs.cpp source/utils.cpp source/audio_data.cpp source/audio.cpp source/frontend.cpp source/TextRectangle.cpp source/TextRectanglePool.cpp source/WindowScreen.cpp source/WindowScreen_Menu.cpp source/devicecapture.cpp source/conversions.cpp source/ExtraButtons.cpp source/Menus/ConnectionMenu.cpp source/Menus/OptionSelectionMenu.cpp source/Menus/MainMenu.cpp source/Menus/VideoMenu.cpp source/Menus/CropMenu.cpp source/Menus/PARMenu.cpp source/Menus/RotationMenu.cpp source/Menus/OffsetMenu.cpp source/Menus/AudioMenu.cpp source/Menus/BFIMenu.cpp source/Menus/RelativePositionMenu.cpp source/Menus/ResolutionMenu.cpp source/Menus/FileConfigMenu.cpp source/Menus/ExtraSettingsMenu.cpp source/Menus/StatusMenu.cpp source/Menus/LicenseMenu.cpp source/WindowCommands.cpp source/Menus/ShortcutMenu.cpp source/Menus/ActionSelectionMenu.cpp source/Menus/ScalingRatioMenu.cpp source/Menus/ISNitroMenu.cpp source/Menus/PartnerCTRMenu.cpp source/Menus/VideoEffectsMenu.cpp source/CaptureDataBuffers.cpp source/Menus/InputMenu.cpp source/Menus/AudioDeviceMenu.cpp source/Menus/SeparatorMenu.cpp source/Menus/ColorCorrectionMenu.cpp source/Menus/Main3DMenu.cpp source/Menus/SecondScreen3DRelativePositionMenu.cpp source/Menus/USBConflictResolutionMenu.cpp source/Menus/Optimize3DSMenu.cpp source/Menus/OptimizeSerialKeyAddMenu.cpp source/libgpiod_compat.cpp ${TOOLS_DATA_DIR}/optimize_serial_key_add_table.cpp ${TOOLS_DATA_DIR}/optimize_serial_key_next_char_table.cpp ${TOOLS_DATA_DIR}/optimize_serial_key_prev_char_table.cpp ${TOOLS_DATA_DIR}/font_ttf.cpp ${TOOLS_DATA_DIR}/font_mono_ttf.cpp ${TOOLS_DATA_DIR}/shaders_list.cpp ${SOURCE_CPP_EXTRA_FILES})
+
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Android")
+	add_compile_flag("SFML_SYSTEM_ANDROID")
+	# Create the cc3dsfs.so library that contains the application's c++ code
+	add_library(${OUTPUT_NAME} SHARED ${EXECUTABLE_SOURCE_FILES})
+	list(APPEND EXTRA_LIBRARIES android)
+	list(APPEND EXTRA_LIBRARIES log)
+	list(APPEND EXTRA_LIBRARIES EGL::EGL)
+	list(APPEND EXTRA_LIBRARIES GLES::GLES)
+else()
+	add_executable(${OUTPUT_NAME} ${EXECUTABLE_SOURCE_FILES})
+endif()
 
 if(NOT ("${EXTRA_DEPENDENCIES}" STREQUAL ""))
 	add_dependencies(${OUTPUT_NAME} ${EXTRA_DEPENDENCIES})
 endif()
 target_link_libraries(${OUTPUT_NAME} PRIVATE SFML::Graphics SFML::Audio SFML::Window SFML::System ${EXTRA_LIBRARIES})
 if(USE_LIBUSB_SUPPORT)
-	target_link_libraries(${OUTPUT_NAME} PRIVATE usb-1.0)
+	if(${CMAKE_SYSTEM_NAME} STREQUAL "Android")
+		target_link_libraries(${OUTPUT_NAME} PRIVATE ${LIBUSB_DIR}/libs/${CMAKE_ANDROID_ARCH_ABI}/libusb1.0.so)
+	else()
+		target_link_libraries(${OUTPUT_NAME} PRIVATE usb-1.0)
+	endif()
 endif()
-if(N3DSXL_LOOPY_SUPPORT)
+if(USE_FTD3XX_FOR_N3DSXL_LOOPY)
 	target_link_libraries(${OUTPUT_NAME} PRIVATE ${ftd3xx_BINARY_DIR}/${FTD3XX_SUBFOLDER}/${FTD3XX_LIB})
-endif()
-if(USE_LIBFTDI_FOR_NEW_DS_LOOPY)
-	target_link_libraries(${OUTPUT_NAME} PRIVATE ftdi1-static)
 endif()
 if(USE_FTD2XX_FOR_NEW_DS_LOOPY)
 	target_link_libraries(${OUTPUT_NAME} PRIVATE ${ftd2xx_BINARY_DIR}/${FTD2XX_SUBFOLDER}/${FTD2XX_LIB})
 endif()
-target_include_directories(${OUTPUT_NAME} PRIVATE ${EXTRA_INCLUDE_DIRECTORIES} ${TOOLS_DATA_DIR} ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/include/Menus ${CMAKE_SOURCE_DIR}/include/CaptureDeviceSpecific ${CMAKE_SOURCE_DIR}/include/CaptureDeviceSpecific/ISDevices ${CMAKE_SOURCE_DIR}/include/CaptureDeviceSpecific/DSCapture_FTD2 ${libftdi1_SOURCE_DIR}/src)
+target_include_directories(${OUTPUT_NAME} PRIVATE ${EXTRA_INCLUDE_DIRECTORIES} ${TOOLS_DATA_DIR} ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/include/Menus ${CMAKE_SOURCE_DIR}/include/CaptureDeviceSpecific ${CMAKE_SOURCE_DIR}/include/CaptureDeviceSpecific/ISDevices ${CMAKE_SOURCE_DIR}/include/CaptureDeviceSpecific/Nisetro ${CMAKE_SOURCE_DIR}/include/CaptureDeviceSpecific/Optimize_3DS ${CMAKE_SOURCE_DIR}/include/CaptureDeviceSpecific/CypressShared ${CMAKE_SOURCE_DIR}/include/CaptureDeviceSpecific/3DSCapture_FTD3 ${CMAKE_SOURCE_DIR}/include/CaptureDeviceSpecific/DSCapture_FTD2 ${CMAKE_SOURCE_DIR}/include/CaptureDeviceSpecific/Partner_CTR)
 target_compile_features(${OUTPUT_NAME} PRIVATE cxx_std_20)
 target_compile_options(${OUTPUT_NAME} PRIVATE ${EXTRA_CXX_FLAGS})
+
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Android")
+	target_link_libraries(${OUTPUT_NAME} PUBLIC
+	  -Wl,--whole-archive
+	  SFML::Main
+	  -Wl,--no-whole-archive
+	)
+endif()
 
 add_custom_command(
 	OUTPUT ${TOOLS_DATA_DIR}/font_ttf.cpp
 	COMMENT "Convert font to binary"
 	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/data/font.ttf ${TOOLS_DATA_DIR} font_ttf font_ttf
 	DEPENDS ${CMAKE_SOURCE_DIR}/data/font.ttf ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/font_mono_ttf.cpp
+	COMMENT "Convert mono font to binary"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/data/font_mono.ttf ${TOOLS_DATA_DIR} font_mono_ttf font_mono_ttf
+	DEPENDS ${CMAKE_SOURCE_DIR}/data/font_mono.ttf ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
 )
 
 add_custom_command(
@@ -517,15 +591,22 @@ add_custom_command(
 )
 
 add_custom_command(
-	OUTPUT ${TOOLS_DATA_DIR}/is_twl_cap_crc32_table.cpp
-	COMMENT "Convert binary to C - IS TWL CRC32 table"
-	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/is_twl_cap_crc32_table.bin ${TOOLS_DATA_DIR} is_twl_cap_crc32_table is_twl_cap_crc32_table
-	DEPENDS ${CMAKE_SOURCE_DIR}/bin/is_twl_cap_crc32_table.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+	OUTPUT ${TOOLS_DATA_DIR}/adler_crc32_table_sp.cpp
+	COMMENT "Convert binary to C - Adler CRC32 Special table"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/adler_crc32_table_sp.bin ${TOOLS_DATA_DIR} adler_crc32_table_sp adler_crc32_table_sp
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/adler_crc32_table_sp.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/ccitt32_crc32_table.cpp
+	COMMENT "Convert binary to C - CCITT32 CRC32 table"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/ccitt32_crc32_table.bin ${TOOLS_DATA_DIR} ccitt32_crc32_table ccitt32_crc32_table
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/ccitt32_crc32_table.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
 )
 
 add_custom_command(
 	OUTPUT ${TOOLS_DATA_DIR}/is_twl_cap_init_seed_table.cpp
-	COMMENT "Convert binary to C - IS TWL CRC32 table"
+	COMMENT "Convert binary to C - IS TWL Init Seed table"
 	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/is_twl_cap_init_seed_table.bin ${TOOLS_DATA_DIR} is_twl_cap_init_seed_table is_twl_cap_init_seed_table
 	DEPENDS ${CMAKE_SOURCE_DIR}/bin/is_twl_cap_init_seed_table.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
 )
@@ -537,8 +618,85 @@ add_custom_command(
 	DEPENDS ${CMAKE_SOURCE_DIR}/bin/ftd2_ds2_fw_2.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
 )
 
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/nisetro_ds_fw.cpp
+	COMMENT "Convert fw binary to C - Nisetro DS"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/nisetro_ds_fw.bin ${TOOLS_DATA_DIR} nisetro_ds_fw nisetro_ds_fw
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/nisetro_ds_fw.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/optimize_new_3ds_fw.cpp
+	COMMENT "Convert fw binary to C - Optimize New 3DS"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/optimize_new_3ds_fw.bin ${TOOLS_DATA_DIR} optimize_new_3ds_fw optimize_new_3ds_fw
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/optimize_new_3ds_fw.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/optimize_new_3ds_565_fpga_pl.cpp
+	COMMENT "Convert FPGA 565 PL binary to C - Optimize New 3DS"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/optimize_new_3ds_565_fpga_pl.bin ${TOOLS_DATA_DIR} optimize_new_3ds_565_fpga_pl optimize_new_3ds_565_fpga_pl
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/optimize_new_3ds_565_fpga_pl.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/optimize_new_3ds_888_fpga_pl.cpp
+	COMMENT "Convert FPGA 888 PL binary to C - Optimize New 3DS"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/optimize_new_3ds_888_fpga_pl.bin ${TOOLS_DATA_DIR} optimize_new_3ds_888_fpga_pl optimize_new_3ds_888_fpga_pl
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/optimize_new_3ds_888_fpga_pl.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/optimize_old_3ds_fw.cpp
+	COMMENT "Convert fw binary to C - Optimize Old 3DS"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/optimize_old_3ds_fw.bin ${TOOLS_DATA_DIR} optimize_old_3ds_fw optimize_old_3ds_fw
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/optimize_old_3ds_fw.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/optimize_old_3ds_565_fpga_pl.cpp
+	COMMENT "Convert FPGA 565 PL binary to C - Optimize Old 3DS"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/optimize_old_3ds_565_fpga_pl.bin ${TOOLS_DATA_DIR} optimize_old_3ds_565_fpga_pl optimize_old_3ds_565_fpga_pl
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/optimize_old_3ds_565_fpga_pl.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/optimize_old_3ds_888_fpga_pl.cpp
+	COMMENT "Convert FPGA 888 PL binary to C - Optimize Old 3DS"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/optimize_old_3ds_888_fpga_pl.bin ${TOOLS_DATA_DIR} optimize_old_3ds_888_fpga_pl optimize_old_3ds_888_fpga_pl
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/optimize_old_3ds_888_fpga_pl.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/optimize_serial_key_to_byte_table.cpp
+	COMMENT "Convert table to C - Optimize Key to 5 bits"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/optimize_serial_key_to_byte_table.bin ${TOOLS_DATA_DIR} optimize_serial_key_to_byte_table optimize_serial_key_to_byte_table
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/optimize_serial_key_to_byte_table.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/optimize_serial_key_add_table.cpp
+	COMMENT "Convert table to C - Optimize Serial Key Alphabet"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/optimize_serial_key_add_table.bin ${TOOLS_DATA_DIR} optimize_serial_key_add_table optimize_serial_key_add_table
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/optimize_serial_key_add_table.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/optimize_serial_key_next_char_table.cpp
+	COMMENT "Convert table to C - Optimize Serial Key next character"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/optimize_serial_key_next_char_table.bin ${TOOLS_DATA_DIR} optimize_serial_key_next_char_table optimize_serial_key_next_char_table
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/optimize_serial_key_next_char_table.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
+add_custom_command(
+	OUTPUT ${TOOLS_DATA_DIR}/optimize_serial_key_prev_char_table.cpp
+	COMMENT "Convert table to C - Optimize Serial previous character"
+	COMMAND ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION} ${CMAKE_SOURCE_DIR}/bin/optimize_serial_key_prev_char_table.bin ${TOOLS_DATA_DIR} optimize_serial_key_prev_char_table optimize_serial_key_prev_char_table
+	DEPENDS ${CMAKE_SOURCE_DIR}/bin/optimize_serial_key_prev_char_table.bin ${TOOLS_DATA_DIR}/CMakeBin2C${HOST_FINAL_EXTENSION}
+)
+
 set(SHADERS_LIST "")
-list(APPEND SHADERS_LIST ${CMAKE_SOURCE_DIR}/shaders/bit_crusher_fragment_shader.2_to_x_1_7.frag ${CMAKE_SOURCE_DIR}/shaders/bit_merger_crusher_fragment_shader.2_to_x_1_6.frag ${CMAKE_SOURCE_DIR}/shaders/bit_merger_crusher_fragment_shader_7.frag ${CMAKE_SOURCE_DIR}/shaders/bit_merger_fragment_shader.2_to_x_0_6.frag ${CMAKE_SOURCE_DIR}/shaders/bit_merger_fragment_shader_7.frag ${CMAKE_SOURCE_DIR}/shaders/frame_blending_bit_crusher_fragment_shader.2_to_x_1_7.frag ${CMAKE_SOURCE_DIR}/shaders/frame_blending_fragment_shader.frag ${CMAKE_SOURCE_DIR}/shaders/no_effect_fragment_shader.frag)
+list(APPEND SHADERS_LIST ${CMAKE_SOURCE_DIR}/shaders/bit_crusher_fragment_shader.2_to_x_1_7.frag ${CMAKE_SOURCE_DIR}/shaders/bit_merger_crusher_fragment_shader.2_to_x_1_6.frag ${CMAKE_SOURCE_DIR}/shaders/bit_merger_crusher_fragment_shader_7.frag ${CMAKE_SOURCE_DIR}/shaders/bit_merger_fragment_shader.2_to_x_0_6.frag ${CMAKE_SOURCE_DIR}/shaders/bit_merger_fragment_shader_7.frag ${CMAKE_SOURCE_DIR}/shaders/frame_blending_bit_crusher_fragment_shader.2_to_x_1_7.frag ${CMAKE_SOURCE_DIR}/shaders/frame_blending_fragment_shader.frag ${CMAKE_SOURCE_DIR}/shaders/no_effect_fragment_shader.frag ${CMAKE_SOURCE_DIR}/shaders/color_emulation_fragment_shader.frag)
 
 add_custom_command(
 	OUTPUT ${TOOLS_DATA_DIR}/shaders_list.cpp
@@ -548,7 +706,7 @@ add_custom_command(
 )
 
 if(WIN32)
-	if(N3DSXL_LOOPY_SUPPORT AND WINDOWS_FTD3XX_USE_SHARED_LIB)
+	if(USE_FTD3XX_FOR_N3DSXL_LOOPY AND WINDOWS_FTD3XX_USE_SHARED_LIB)
 		add_custom_command(
 			TARGET ${OUTPUT_NAME}
 			COMMENT "Copy FTD3XX DLL"
@@ -579,9 +737,13 @@ else()
 install(FILES ${CMAKE_SOURCE_DIR}/${OUTPUT_NAME}${FINAL_EXTENSION} DESTINATION .)
 endif()
 install(FILES LICENSE README.md DESTINATION .)
-install(DIRECTORY "other licenses" DESTINATION .)
+install(DIRECTORY "other licenses" DESTINATION .
+		PATTERN "other licenses/ftd3xx.txt" EXCLUDE)
+if(USE_FTD3XX_FOR_N3DSXL_LOOPY)
+	install(FILES "other licenses/ftd3xx.txt" DESTINATION "./other licenses")
+endif()
 if(WIN32)
-	if(N3DSXL_LOOPY_SUPPORT AND WINDOWS_FTD3XX_USE_SHARED_LIB)
+	if(USE_FTD3XX_FOR_N3DSXL_LOOPY AND WINDOWS_FTD3XX_USE_SHARED_LIB)
 		install(FILES ${FTD3XX_DLL} DESTINATION .)
 	endif()
 	if(USE_FTD2XX_FOR_NEW_DS_LOOPY AND WINDOWS_FTD2XX_USE_SHARED_LIB)
@@ -606,6 +768,9 @@ else()
 	install(FILES ${USB_RULES_DIR}/51-istwl.rules DESTINATION .)
 	install(FILES ${USB_RULES_DIR}/50-ftd2xx.rules DESTINATION .)
 	install(FILES ${USB_RULES_DIR}/51-ftd2xx.rules DESTINATION .)
+	install(FILES ${USB_RULES_DIR}/51-nisetro.rules DESTINATION .)
+	install(FILES ${USB_RULES_DIR}/51-optimize.rules DESTINATION .)
+	install(FILES ${USB_RULES_DIR}/51-partnerctr.rules DESTINATION .)
 	install(FILES ${SETUP_SCRIPTS_DIR}/install_usb_rules${SCRIPT_EXTENSION} DESTINATION .)
 endif()
 

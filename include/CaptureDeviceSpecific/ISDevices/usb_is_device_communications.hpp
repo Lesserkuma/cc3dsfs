@@ -55,6 +55,7 @@ struct isd_async_callback_data {
 struct is_device_usb_device {
 	std::string name;
 	std::string long_name;
+	PossibleCaptureDevices index_in_allowed_scan;
 	int vid;
 	int pid;
 	int default_config;
@@ -99,7 +100,7 @@ int StopUsbCaptureDma(is_device_device_handlers* handlers, const is_device_usb_d
 int SetForwardFrameCount(is_device_device_handlers* handlers, uint16_t count, const is_device_usb_device* device_desc);
 int SetForwardFramePermanent(is_device_device_handlers* handlers, const is_device_usb_device* device_desc);
 int GetFrameCounter(is_device_device_handlers* handlers, uint16_t* out, const is_device_usb_device* device_desc);
-int GetDeviceSerial(is_device_device_handlers* handlers, uint8_t* buf, const is_device_usb_device* device_desc);
+int GetIsDeviceSerial(is_device_device_handlers* handlers, uint8_t* buf, const is_device_usb_device* device_desc);
 int UpdateFrameForwardConfig(is_device_device_handlers* handlers, is_device_forward_config_values_colors colors, is_device_forward_config_values_screens screens, is_device_forward_config_values_rate rate, const is_device_usb_device* device_desc);
 int UpdateFrameForwardEnable(is_device_device_handlers* handlers, bool enable, bool restart, const is_device_usb_device* device_desc);
 int ReadLidState(is_device_device_handlers* handlers, bool* out, const is_device_usb_device* device_desc);
@@ -108,6 +109,10 @@ int ReadPowerButtonState(is_device_device_handlers* handlers, bool* out, const i
 int ResetCPUStart(is_device_device_handlers* handlers, const is_device_usb_device* device_desc);
 int ResetCPUEnd(is_device_device_handlers* handlers, const is_device_usb_device* device_desc);
 int ResetFullHardware(is_device_device_handlers* handlers, const is_device_usb_device* device_desc);
+int SetBatteryPercentage(is_device_device_handlers* handlers, const is_device_usb_device* device_desc, int percentage);
+int SetACAdapterConnected(is_device_device_handlers* handlers, const is_device_usb_device* device_desc, bool connected);
+int GetBatteryPercentageValues(is_device_device_handlers* handlers, const is_device_usb_device* device_desc, int* percentage_one, int* percentage_two);
+int GetACAdapterConnectedValues(is_device_device_handlers* handlers, const is_device_usb_device* device_desc, bool* connected_one, bool* connected_two);
 int AskFrameLengthPos(is_device_device_handlers* handlers, uint32_t* video_address, uint32_t* video_length, bool video_enabled, uint32_t* audio_address, uint32_t* audio_length, bool audio_enabled, const is_device_usb_device* device_desc);
 int SetLastFrameInfo(is_device_device_handlers* handlers, uint32_t video_address, uint32_t video_length, uint32_t audio_address, uint32_t audio_length, const is_device_usb_device* device_desc);
 int ReadFrame(is_device_device_handlers* handlers, uint8_t* buf, uint32_t address, uint32_t length, const is_device_usb_device* device_desc);

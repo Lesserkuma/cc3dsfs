@@ -25,7 +25,7 @@ static const InputMenuOptionInfo input_menu_toggle_mouse_option = {
 .out_action = INPUT_MENU_TOGGLE_MOUSE};
 
 static const InputMenuOptionInfo input_menu_toggle_fast_poll_option = {
-.base_name = "Disable Slow Poll", .false_name = "Enable Slow Poll",
+.base_name = "Speed up Input checks", .false_name = "Slow down Input checks",
 .out_action = INPUT_MENU_TOGGLE_FAST_POLL};
 
 static const InputMenuOptionInfo input_menu_shortcut_option = {
@@ -41,9 +41,9 @@ static const InputMenuOptionInfo* pollable_options[] = {
 &input_menu_toggle_buttons_option,
 };
 
-InputMenu::InputMenu(bool font_load_success, sf::Font &text_font) : OptionSelectionMenu(){
+InputMenu::InputMenu(TextRectanglePool* text_rectangle_pool) : OptionSelectionMenu(){
 	this->options_indexes = new int[NUM_TOTAL_MENU_OPTIONS];
-	this->initialize(font_load_success, text_font);
+	this->initialize(text_rectangle_pool);
 	this->num_enabled_options = 0;
 }
 
@@ -58,8 +58,8 @@ void InputMenu::class_setup() {
 	this->width_divisor_menu = 9;
 	this->base_height_factor_menu = 12;
 	this->base_height_divisor_menu = 6;
-	this->min_text_size = 0.3;
-	this->max_width_slack = 1.1;
+	this->min_text_size = 0.3f;
+	this->max_width_slack = 1.1f;
 	this->menu_color = sf::Color(30, 30, 60, 192);
 	this->title = "Input Settings";
 	this->show_back_x = true;
@@ -69,7 +69,7 @@ void InputMenu::class_setup() {
 
 void InputMenu::insert_data(bool enabled_shortcuts, bool enabled_extra_buttons) {
 	this->num_enabled_options = 0;
-	for(int i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
+	for(size_t i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
 		bool valid = true;
 		InputMenuOutAction out_action = pollable_options[i]->out_action;
 		if((out_action == INPUT_MENU_SHORTCUT_SETTINGS) && (!enabled_shortcuts))
@@ -77,7 +77,7 @@ void InputMenu::insert_data(bool enabled_shortcuts, bool enabled_extra_buttons) 
 		if((out_action == INPUT_MENU_TOGGLE_BUTTONS) && (!(enabled_shortcuts || enabled_extra_buttons)))
 			valid = false;
 		if(valid) {
-			this->options_indexes[this->num_enabled_options] = i;
+			this->options_indexes[this->num_enabled_options] = (int)i;
 			this->num_enabled_options++;
 		}
 	}
@@ -95,7 +95,7 @@ void InputMenu::set_output_option(int index, int action) {
 		this->selected_index = pollable_options[this->options_indexes[index]]->out_action;
 }
 
-int InputMenu::get_num_options() {
+size_t InputMenu::get_num_options() {
 	return this->num_enabled_options;
 }
 

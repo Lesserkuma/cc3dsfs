@@ -1,11 +1,12 @@
 #ifndef __OPTIONSELECTIONMENU_HPP
 #define __OPTIONSELECTIONMENU_HPP
 
-#include <SFML/Graphics.hpp>
 #include <chrono>
 
+#include "GenericMenu.hpp"
+
 #include "TextRectangle.hpp"
-#include "event_structs.hpp"
+#include "TextRectanglePool.hpp"
 
 #define BACK_X_OUTPUT_OPTION -1
 
@@ -15,13 +16,13 @@
 #define INC_ACTION 2
 #define FALSE_ACTION 3
 
-class OptionSelectionMenu {
+class OptionSelectionMenu : public GenericMenu {
 public:
 	OptionSelectionMenu();
-	~OptionSelectionMenu();
+	virtual ~OptionSelectionMenu();
 	bool poll(SFEvent &event_data);
 	void draw(float scaling_factor, sf::RenderTarget &window);
-	void reset_data();
+	void reset_data(bool full_reset);
 	std::chrono::time_point<std::chrono::high_resolution_clock> last_input_processed_time;
 	virtual void reset_output_option();
 protected:
@@ -43,14 +44,15 @@ protected:
 	virtual bool is_option_selectable(int index, int action);
 	virtual bool is_option_inc_dec(int index);
 	virtual void set_output_option(int index, int action);
-	virtual int get_num_options();
+	virtual size_t get_num_options();
 	virtual std::string get_string_option(int index, int action);
 	virtual void class_setup();
+	virtual float get_option_text_factor(int index) { return 1.0; }
 
 	int single_option_multiplier;
 
 	int get_num_pages();
-	void initialize(bool font_load_success, sf::Font &text_font);
+	void initialize(TextRectanglePool* text_pool);
 	void prepare_options();
 	void base_prepare(float menu_scaling_factor, int view_size_x, int view_size_y);
 	std::string setTextOptionInt(int index, int value);
@@ -84,9 +86,7 @@ private:
 	int next_page_id;
 
 	std::chrono::time_point<std::chrono::high_resolution_clock> last_action_time;
-	const float action_timeout = 0.1;
-	int loaded_page = 0;
-	int option_selected = -1;
+	const float action_timeout = 0.1f;
 	bool *selectable_labels;
 	bool *loaded_enabled_labels;
 	MenuData loaded_data;

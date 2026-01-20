@@ -1,4 +1,7 @@
 #include "MainMenu.hpp"
+#include "usb_is_device_acquisition.hpp"
+#include "cypress_optimize_3ds_acquisition.hpp"
+#include "cypress_partner_ctr_acquisition.hpp"
 
 #define NUM_TOTAL_MENU_OPTIONS (sizeof(pollable_options)/sizeof(pollable_options[0]))
 
@@ -111,7 +114,7 @@ static const MainMenuOptionInfo extra_settings_option = {
 .base_name = "Extra Settings", .false_name = "",
 .active_fullscreen = true, .active_windowed_screen = true,
 .active_joint_screen = true, .active_top_screen = true, .active_bottom_screen = true,
-.enabled_normal_mode = false, .enabled_mono_mode = true, .is_cc_specific = false,
+.enabled_normal_mode = true, .enabled_mono_mode = true, .is_cc_specific = false,
 .out_action = MAIN_MENU_EXTRA_SETTINGS};
 
 /*
@@ -131,11 +134,32 @@ static const MainMenuOptionInfo shutdown_option = {
 .out_action = MAIN_MENU_SHUTDOWN};
 
 static const MainMenuOptionInfo isn_settings_option = {
-.base_name = "Is Nitro Settings", .false_name = "",
+.base_name = "IS Nitro Settings", .false_name = "",
 .active_fullscreen = true, .active_windowed_screen = true,
 .active_joint_screen = true, .active_top_screen = true, .active_bottom_screen = true,
 .enabled_normal_mode = true, .enabled_mono_mode = true, .is_cc_specific = true,
 .out_action = MAIN_MENU_ISN_SETTINGS};
+
+static const MainMenuOptionInfo ist_settings_option = {
+.base_name = "IS TWL Settings", .false_name = "",
+.active_fullscreen = true, .active_windowed_screen = true,
+.active_joint_screen = true, .active_top_screen = true, .active_bottom_screen = true,
+.enabled_normal_mode = true, .enabled_mono_mode = true, .is_cc_specific = true,
+.out_action = MAIN_MENU_IST_SETTINGS};
+
+static const MainMenuOptionInfo opti_3ds_settings_option = {
+.base_name = "Optimize 3DS Settings", .false_name = "",
+.active_fullscreen = true, .active_windowed_screen = true,
+.active_joint_screen = true, .active_top_screen = true, .active_bottom_screen = true,
+.enabled_normal_mode = true, .enabled_mono_mode = true, .is_cc_specific = true,
+.out_action = MAIN_MENU_OPTIMIZE_3DS_SETTINGS};
+
+static const MainMenuOptionInfo partner_ctr_settings_option = {
+.base_name = "Partner CTR Settings", .false_name = "",
+.active_fullscreen = true, .active_windowed_screen = true,
+.active_joint_screen = true, .active_top_screen = true, .active_bottom_screen = true,
+.enabled_normal_mode = true, .enabled_mono_mode = true, .is_cc_specific = true,
+.out_action = MAIN_MENU_PARTNER_CTR_SETTINGS};
 
 static const MainMenuOptionInfo* pollable_options[] = {
 &connect_option,
@@ -151,15 +175,18 @@ static const MainMenuOptionInfo* pollable_options[] = {
 //&shortcut_option,
 &status_option,
 &isn_settings_option,
+&ist_settings_option,
+&opti_3ds_settings_option,
+&partner_ctr_settings_option,
 &licenses_option,
 &extra_settings_option,
 &quit_option,
 &shutdown_option,
 };
 
-MainMenu::MainMenu(bool font_load_success, sf::Font &text_font) : OptionSelectionMenu(){
+MainMenu::MainMenu(TextRectanglePool* text_rectangle_pool) : OptionSelectionMenu(){
 	this->options_indexes = new int[NUM_TOTAL_MENU_OPTIONS];
-	this->initialize(font_load_success, text_font);
+	this->initialize(text_rectangle_pool);
 	this->num_enabled_options = 0;
 }
 
@@ -174,8 +201,8 @@ void MainMenu::class_setup() {
 	this->width_divisor_menu = 9;
 	this->base_height_factor_menu = 12;
 	this->base_height_divisor_menu = 6;
-	this->min_text_size = 0.3;
-	this->max_width_slack = 1.1;
+	this->min_text_size = 0.3f;
+	this->max_width_slack = 1.1f;
 	this->menu_color = sf::Color(30, 30, 60, 192);
 	this->title = "Main Menu";
 	this->show_back_x = true;
@@ -183,15 +210,27 @@ void MainMenu::class_setup() {
 	this->show_title = true;
 }
 
-static bool check_cc_specific_option(const MainMenuOptionInfo* option, CaptureConnectionType cc_type) {
-	if((option->out_action == MAIN_MENU_ISN_SETTINGS) && (cc_type == CAPTURE_CONN_IS_NITRO))
+static bool check_cc_specific_option(const MainMenuOptionInfo* option, CaptureDevice* device) {
+	#ifdef USE_IS_DEVICES_USB
+	if((option->out_action == MAIN_MENU_ISN_SETTINGS) && is_device_is_nitro(device))
 		return true;
+	if((option->out_action == MAIN_MENU_IST_SETTINGS) && is_device_is_twl(device))
+		return true;
+	#endif
+	#ifdef USE_CYPRESS_OPTIMIZE
+	if((option->out_action == MAIN_MENU_OPTIMIZE_3DS_SETTINGS) && is_device_optimize_3ds(device))
+		return true;
+	#endif
+	#ifdef USE_PARTNER_CTR
+	if((option->out_action == MAIN_MENU_PARTNER_CTR_SETTINGS) && is_device_partner_ctr(device))
+		return true;
+	#endif
 	return false;
 }
 
-void MainMenu::insert_data(ScreenType s_type, bool is_fullscreen, bool mono_app_mode, CaptureConnectionType cc_type, bool connected) {
+void MainMenu::insert_data(ScreenType s_type, bool is_fullscreen, bool mono_app_mode, CaptureDevice* device, bool connected) {
 	this->num_enabled_options = 0;
-	for(int i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
+	for(size_t i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
 		bool valid = true;
 		if(is_fullscreen)
 			valid = valid && pollable_options[i]->active_fullscreen;
@@ -208,11 +247,13 @@ void MainMenu::insert_data(ScreenType s_type, bool is_fullscreen, bool mono_app_
 		else
 			valid = valid && pollable_options[i]->enabled_normal_mode;
 		if(pollable_options[i]->is_cc_specific)
-			valid = valid && connected && check_cc_specific_option(pollable_options[i], cc_type);
+			valid = valid && connected && check_cc_specific_option(pollable_options[i], device);
+		if(pollable_options[i]->out_action == MAIN_MENU_EXTRA_SETTINGS)
+			valid = valid && (ExtraSettingsMenu::get_total_possible_selectable_inserted(s_type, is_fullscreen, mono_app_mode) > 0);
 		//if((pollable_options[i]->out_action == MAIN_MENU_SHORTCUT_SETTINGS) && (!enable_shortcut))
 		//	valid = false;
 		if(valid) {
-			this->options_indexes[this->num_enabled_options] = i;
+			this->options_indexes[this->num_enabled_options] = (int)i;
 			this->num_enabled_options++;
 		}
 	}
@@ -230,7 +271,7 @@ void MainMenu::set_output_option(int index, int action) {
 		this->selected_index = pollable_options[this->options_indexes[index]]->out_action;
 }
 
-int MainMenu::get_num_options() {
+size_t MainMenu::get_num_options() {
 	return this->num_enabled_options;
 }
 

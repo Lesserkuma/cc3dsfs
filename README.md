@@ -3,7 +3,13 @@
 cc3dsfs is a multi-platform capture and display program for [3dscapture's](https://3dscapture.com/) N3DSXL, 3DS and DS capture boards written in C++.
 The main goal is to offer the ability to use the Capture Card with a TV, via fullscreen mode.
 
-IS Nitro Emulator (newer revisions) and IS Nitro Capture support is also present. Though results may vary (and the amount of video delay may be significantly higher based on the cable used).
+IS Nitro Emulator (newer revisions), IS Nitro Capture and IS TWL Capture support is also present. Though results may vary (and the amount of video delay may be significantly higher based on the cable used).
+
+Optimize Old 3DS capture boards and Optimize New 3DS capture boards are also supported. Older revisions of the capture boards may not be supported at the moment, though.
+
+Partner CTR Capture devices are supported.
+
+Finally, support for a really old Chameleon USB FX2 board is also present, used with Nisetro DS(i) capture boards.
 
 ## Features
 
@@ -13,6 +19,7 @@ IS Nitro Emulator (newer revisions) and IS Nitro Capture support is also present
 - Many builtin crop options for the screens.
 - Many other settings, explained in [Controls](#Controls).
 - Prebuilt executables available in the [Releases](https://github.com/Lorenzooone/cc3dsfs/releases/latest) page for ease of use.
+- Various command line arguments to personalize how the software should behave. Use -h or --help as an argument to display the help message.
 
 _Note: On 3DS, DS, GBA, GBC and GB games boot in scaled resolution mode by default. Holding START or SELECT while launching these games will boot in native resolution mode._
 
@@ -24,7 +31,7 @@ cc3dsfs has three build dependencies: CMake, g++ and git.
 Make sure all are installed.
 On MacOS, [Homebrew](https://brew.sh/) can be used to install both CMake and git. An automatic popup should appear to install g++ at Compile time.
 
-cc3dsfs has five library dependencies: [FTDI's D3XX driver](https://ftdichip.com/drivers/d3xx-drivers/), [FTDI's D2XX driver](https://ftdichip.com/drivers/d2xx-drivers/) (on Windows), [libusb](https://libusb.info/), [libftdi](https://www.intra2net.com/en/developer/libftdi/) and [SFML](https://www.sfml-dev.org/).
+cc3dsfs has four library dependencies: [FTDI's D3XX driver](https://ftdichip.com/drivers/d3xx-drivers/) (on Windows), [FTDI's D2XX driver](https://ftdichip.com/drivers/d2xx-drivers/) (on Windows), [libusb](https://libusb.info/) and [SFML](https://www.sfml-dev.org/).
 All of them should get downloaded automatically via CMake during the building process.
 
 Linux users who wish to compile this, will also need to install the SFML dependencies. Different distributions will require slightly different processes.
@@ -46,6 +53,7 @@ sudo apt install \
     libdrm-dev \
     libgbm-dev \
     libfreetype-dev \
+    libharfbuzz-dev \
     xorg-dev
 ```
 
@@ -58,7 +66,7 @@ On Windows, you may need to install the Visual C++ Redistributable set of librar
 To compile the program, assuming CMake, git and g++ are installed on the system, this is the command which should be launched:
 
 ```
-cmake -B build ; cmake --build build --config Release
+cmake -B build -DCMAKE_BUILD_TYPE=Release ; cmake --build build --config Release
 ```
 
 This will download FTD3XX, FTD2XX, libusb and SFML, which may take a while during the first execution of the command. Later runs should be much faster.
@@ -66,13 +74,13 @@ On MacOS, you may also be prompted to install the Apple Command Line Developer T
 
 When compiling on a Raspberry Pi, to enable usage of GPIO, use:
 ```
-cmake -B build -DRASPBERRY_PI_COMPILATION=TRUE ; cmake --build build --config Release
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DRASPBERRY_PI_COMPILATION=TRUE ; cmake --build build --config Release
 ```
 
 ### Docker Compilation
 
 Alternatively, one may use Docker to compile the Linux version for its different architectures by running: `docker run --rm -it -v ${PWD}:/home/builder/cc3dsfs lorenzooone/cc3dsfs:<builder>`
-The following builders are available: builder32, builder64, builderarm32 and builderarm64.
+The following builders are available: builder32, builder64, builderarm32, builderarm64, builderriscv64 and builderandroid (in beta).
 
 ## Controls
 
@@ -80,16 +88,16 @@ The software has a GUI which exposes all of the available settings. There are al
 Most of the settings are explained in [Keyboard shortcuts](#Keyboard-shortcuts).
 
 ### Keyboard controls
-- __Enter key__: Used to open the GUI when it is not shown, as well as to confirm the selection of an option. Holding it for 30 seconds will reset the application to its defaults.
+- __Enter key__: Used to open the GUI when it is not shown, as well as to confirm the selection of an option. Holding it for 10 seconds will reset the application to its defaults.
 - __Arrow keys__: Used to change the selected option in the GUI.
 
 ### Mouse controls
-- __Right click__: Used to open the GUI when it is not shown. Holding it for 30 seconds will reset the application to its defaults.
+- __Right click__: Used to open the GUI when it is not shown. Holding it for 10 seconds will reset the application to its defaults.
 - __Left click__: Used to confirm the selection of an option.
 
 ### Joystick controls
 - __Option/Share buttons__: Used to open the GUI when it is not shown.
-- __A/B/X/Y buttons__: Used to confirm the selection of an option. Holding B (X on a PS5 controller) for 30 seconds will reset the application to its defaults.
+- __A/B/X/Y buttons__: Used to confirm the selection of an option. Holding B (X on a PS5 controller) for 10 seconds will reset the application to its defaults.
 - __Dpad/Sitcks__: Used to change the selected option in the GUI.
 
 _Note: Currently only tested using a PS5 controller._
@@ -132,9 +140,11 @@ The current configuration can be saved to various extra profiles, creating the g
 
 The name of profiles can be changed by altering the __name__ field in its file.
 
-On Linux and MacOS, the profiles can be found at the "${HOME}/.config/cc3dsfs" folder. By default, "/home/<user_name>/.config/cc3dsfs".
+On Linux and MacOS, by default the profiles can be found at the "${HOME}/.config/cc3dsfs" folder. Or "/home/<user_name>/.config/cc3dsfs".
 
 On Windows, the profiles can be found in the ".config/cc3dsfs" folder inside the directory in which the program runs from.
+
+The CC3DSFS\_CFG\_DIR environment variable can be used to specify a different target folder for cc3dsfs to store its data.
 
 ## Notes
 - On Linux, you may need to include the udev USB access rules. You can use the .rules files available in the repository's usb\_rules directory, or define your own. For ease of use, releases come bundled with a script to do it named install\_usb\_rules.sh. It may require elevated permissions to execute properly. You may get a permission error if the rules are not installed.
@@ -145,4 +155,13 @@ On Windows, the profiles can be found in the ".config/cc3dsfs" folder inside the
 - Enabling Slow Poll may slightly boost the FPS of the software, at the cost of an extremely slight decrease in frame latency, and slower reaction times of the software to key presses. Disabled by default (as when the FPS are greater than the CC's, it's not reccomended).
 - On MacOS, you may get a notice about Apple being unable to check for malware, or the developer being unknown. To open the program regardless of that, check the [Official Guide for "Opening Applications from Unknown Developers" from Apple, for your version of MacOS](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
 - Certain TVs/Monitors may add some audio delay for the purpose of video/lip syncing. If you're experiencing too much audio delay when using this software, try checking in the TV/Monitor settings whether you can reduce that added delay. One of the names used for that setting is "Lip Sync", or something along that line.
-- When using IS Nitro Emulator or IS Nitro Capture devices on Windows, cc3dsfs is compatible with both the official driver and WinUSB, with the latter being useful if you don't have access to the official driver. To install and use WinUSB, plug in your device, download a software to install drivers like [Zadig](https://zadig.akeo.ie/), select the device in question and select WinUSB. Then install the driver and wait for it to finish. The devices should now work properly with this application.
+- When using IS Nitro Emulator, IS Nitro Capture or IS TWL Capture devices on Windows, cc3dsfs is compatible with both the official driver and WinUSB, with the latter being useful if you don't have access to the official driver. To install and use WinUSB, plug in your device, download a software to install drivers like [Zadig](https://zadig.akeo.ie/), select the device in question and select WinUSB. Then install the driver and wait for it to finish. The devices should now work properly with this application.
+- When using Partner CTR Capture devices on Windows, cc3dsfs is compatible with both the official driver and libusb-win32 (or alternatives), with the latter being useful if you don't have access to the official driver. To install and use libusb-win32 (or alternatives), plug in your device, download a software to install drivers like [Zadig](https://zadig.akeo.ie/), select the device in question and select libusb-win32 (or alternatives). Then install the driver and wait for it to finish. The devices should now work properly with this application.
+- When using the new 2024 Loopy DS Capture Card on Windows, the default driver (FTD2XX) adds one extra frame of latency. To remove that, consider switching to WinUSB as the driver. To change driver, download a software to install drivers like [Zadig](https://zadig.akeo.ie/), select the device in question and select WinUSB. Then install the driver and wait for it to finish. The application will now use WinUSB, with better latency (the serial shown in the Status menu will have an l where there previously was a d).
+- There are multiple capture cards which use the same EZ-USB FX2LP board, creating a conflict. These are the Optimize Old 3DS capture cards and the Nisetro DS(i) capture cards. This means that when the user connects a device which uses the EZ-USB FX2LP board, they need to select one capture card among the possible ones. To avoid this extra step, the user can disable scanning for the conflicting capture cards they do not intend to use. The settings to do this are available under Extra Settings -> USB Conflict Resolution.
+- MacOS does not allow running multiple instances of the same application, normally. If you want to run multiple instances of cc3dsfs on MacOS, open the terminal in the folder where cc3dsfs is and type `open -n cc3dsfs.app`.
+- To properly use the Optimize capture cards with cc3dsfs, a serial key is needed. This can be added via the _Optimize 3DS Settings_, under the _Add New Serial Key_ option. You can use CTRL+V in the textbox to copy the serial key, or insert it manually. To obtain the key, get your device ID (it can be copied from the _Optimize 3DS Settings_ menu) and type it in the [Official site](https://optimize.ath.cx/productkey_en.html). Using a keyboard to do this is suggested (but not required).
+- Keys are saved under the keys folder inside the cc3dsfs config folder.
+- To reset to the default settings, besides the options shown in [Controls](#Controls), you can find the _Reset Settings_ option inside of the _Extra Settings_.
+- When using an Optimize Old 3DS Capture Card or a Nisetro DS(i) Capture Card on Windows, make sure either the Cypress USB drivers are installed, or the Optimize Old 3DS drivers are installed. Alternatively, it is also possible to install libusb-win32 or alternatives to use with the devices via software to install drivers like [Zadig](https://zadig.akeo.ie/).
+- When using an Optimize New 3DS Capture Card on Windows, make sure the Optimize New 3DS drivers are installed. Also ensure either the Cypress USB drivers are installed, or the Optimize Old 3DS drivers are installed. Alternatively, it is also possible to install libusb-win32 or alternatives to use with the device via software to install drivers like [Zadig](https://zadig.akeo.ie/).

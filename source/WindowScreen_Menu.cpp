@@ -1,6 +1,13 @@
+#include <cmath>
+
 #include "frontend.hpp"
+#include "SFML/Audio/PlaybackDevice.hpp"
+#include "devicecapture.hpp"
 
 #define FPS_WINDOW_SIZE 64
+
+static const int is_battery_levels[] = {1, 5, 12, 25, 50, 100};
+static const int partner_ctr_battery_levels[] = {0, 1, 10, 30, 60, 100};
 
 static const sf::VideoMode default_fs_mode_4_5k_macos = sf::VideoMode({4480, 2520});
 static const sf::VideoMode default_fs_mode_4k_macos = sf::VideoMode({4096, 2304});
@@ -48,7 +55,7 @@ static void check_held_reset(bool value, HeldTime &action_time) {
 static float check_held_diff(std::chrono::time_point<std::chrono::high_resolution_clock> &curr_time, HeldTime &action_time) {
 	if(!action_time.started)
 		return 0.0;
-	const std::chrono::duration<double> diff = curr_time - action_time.start_time;
+	const std::chrono::duration<float> diff = curr_time - action_time.start_time;
 	return diff.count();
 }
 
@@ -91,27 +98,37 @@ static double FPSArrayGetAverage(FPSArray *array) {
 
 void WindowScreen::init_menus() {
 	this->last_menu_change_time = std::chrono::high_resolution_clock::now();
-	this->connection_menu = new ConnectionMenu(this->font_load_success, this->text_font);
-	this->main_menu = new MainMenu(this->font_load_success, this->text_font);
-	this->video_menu = new VideoMenu(this->font_load_success, this->text_font);
-	this->crop_menu = new CropMenu(this->font_load_success, this->text_font);
-	this->par_menu = new PARMenu(this->font_load_success, this->text_font);
-	this->offset_menu = new OffsetMenu(this->font_load_success, this->text_font);
-	this->rotation_menu = new RotationMenu(this->font_load_success, this->text_font);
-	this->audio_menu = new AudioMenu(this->font_load_success, this->text_font);
-	this->bfi_menu = new BFIMenu(this->font_load_success, this->text_font);
-	this->relpos_menu = new RelativePositionMenu(this->font_load_success, this->text_font);
-	this->resolution_menu = new ResolutionMenu(this->font_load_success, this->text_font);
-	this->fileconfig_menu = new FileConfigMenu(this->font_load_success, this->text_font);
-	this->extra_menu = new ExtraSettingsMenu(this->font_load_success, this->text_font);
-	this->status_menu = new StatusMenu(this->font_load_success, this->text_font);
-	this->license_menu = new LicenseMenu(this->font_load_success, this->text_font);
-	this->shortcut_menu = new ShortcutMenu(this->font_load_success, this->text_font);
-	this->action_selection_menu = new ActionSelectionMenu(this->font_load_success, this->text_font);
-	this->scaling_ratio_menu = new ScalingRatioMenu(this->font_load_success, this->text_font);
-	this->is_nitro_menu = new ISNitroMenu(this->font_load_success, this->text_font);
-	this->video_effects_menu = new VideoEffectsMenu(this->font_load_success, this->text_font);
-	this->input_menu = new InputMenu(this->font_load_success, this->text_font);
+	this->last_data_format_change_time = std::chrono::high_resolution_clock::now();
+	this->connection_menu = new ConnectionMenu(this->text_rectangle_pool);
+	this->main_menu = new MainMenu(this->text_rectangle_pool);
+	this->video_menu = new VideoMenu(this->text_rectangle_pool);
+	this->crop_menu = new CropMenu(this->text_rectangle_pool);
+	this->par_menu = new PARMenu(this->text_rectangle_pool);
+	this->offset_menu = new OffsetMenu(this->text_rectangle_pool);
+	this->rotation_menu = new RotationMenu(this->text_rectangle_pool);
+	this->audio_menu = new AudioMenu(this->text_rectangle_pool);
+	this->bfi_menu = new BFIMenu(this->text_rectangle_pool);
+	this->relpos_menu = new RelativePositionMenu(this->text_rectangle_pool);
+	this->resolution_menu = new ResolutionMenu(this->text_rectangle_pool);
+	this->fileconfig_menu = new FileConfigMenu(this->text_rectangle_pool);
+	this->extra_menu = new ExtraSettingsMenu(this->text_rectangle_pool);
+	this->status_menu = new StatusMenu(this->text_rectangle_pool);
+	this->license_menu = new LicenseMenu(this->text_rectangle_pool);
+	this->shortcut_menu = new ShortcutMenu(this->text_rectangle_pool);
+	this->action_selection_menu = new ActionSelectionMenu(this->text_rectangle_pool);
+	this->scaling_ratio_menu = new ScalingRatioMenu(this->text_rectangle_pool);
+	this->is_nitro_menu = new ISNitroMenu(this->text_rectangle_pool);
+	this->partner_ctr_menu = new PartnerCTRMenu(this->text_rectangle_pool);
+	this->video_effects_menu = new VideoEffectsMenu(this->text_rectangle_pool);
+	this->input_menu = new InputMenu(this->text_rectangle_pool);
+	this->audio_device_menu = new AudioDeviceMenu(this->text_rectangle_pool);
+	this->separator_menu = new SeparatorMenu(this->text_rectangle_pool);
+	this->color_correction_menu = new ColorCorrectionMenu(this->text_rectangle_pool);
+	this->main_3d_menu = new Main3DMenu(this->text_rectangle_pool);
+	this->second_screen_3d_relpos_menu = new SecondScreen3DRelativePositionMenu(this->text_rectangle_pool);
+	this->usb_conflict_resolution_menu = new USBConflictResolutionMenu(this->text_rectangle_pool);
+	this->optimize_3ds_menu = new Optimize3DSMenu(this->text_rectangle_pool);
+	this->optimize_serial_key_add_menu = new OptimizeSerialKeyAddMenu(this->text_rectangle_pool);
 }
 
 void WindowScreen::destroy_menus() {
@@ -134,8 +151,17 @@ void WindowScreen::destroy_menus() {
 	delete this->action_selection_menu;
 	delete this->scaling_ratio_menu;
 	delete this->is_nitro_menu;
+	delete this->partner_ctr_menu;
 	delete this->video_effects_menu;
 	delete this->input_menu;
+	delete this->audio_device_menu;
+	delete this->separator_menu;
+	delete this->color_correction_menu;
+	delete this->main_3d_menu;
+	delete this->second_screen_3d_relpos_menu;
+	delete this->usb_conflict_resolution_menu;
+	delete this->optimize_3ds_menu;
+	delete this->optimize_serial_key_add_menu;
 }
 
 void WindowScreen::set_close(int ret_val) {
@@ -177,7 +203,7 @@ void WindowScreen::blur_change() {
 
 void WindowScreen::fast_poll_change() {
 	this->shared_data->input_data.fast_poll = !this->shared_data->input_data.fast_poll;
-	this->print_notification_on_off("Slow Poll", this->shared_data->input_data.fast_poll);
+	this->print_notification_on_off("Slow Input checks", this->shared_data->input_data.fast_poll);
 }
 
 void WindowScreen::is_nitro_capture_type_change(bool positive) {
@@ -202,6 +228,49 @@ void WindowScreen::is_nitro_capture_reset_hw() {
 	this->capture_status->reset_hardware = true;
 }
 
+void WindowScreen::generic_battery_change(bool positive, int &battery_percentage, const int *allowed_battery_levels, size_t num_levels) {
+	if(battery_percentage < allowed_battery_levels[0])
+		battery_percentage = allowed_battery_levels[0];
+	if(battery_percentage > 100)
+		battery_percentage = 100;
+	size_t closest_level = 0;
+	int curr_diff = 100;
+	for(size_t i = 0; i < num_levels; i++) {
+		int level_diff = abs(allowed_battery_levels[i] - battery_percentage);
+		if(level_diff < curr_diff) {
+			closest_level = i;
+			curr_diff = level_diff;
+		}
+	}
+	if((!positive) && (closest_level > 0))
+		closest_level -= 1;
+	if((positive) && (closest_level < (num_levels - 1)))
+		closest_level += 1;
+	if(allowed_battery_levels[closest_level] != battery_percentage)
+		this->print_notification("Changing battery level...\nPlease wait...");
+	battery_percentage = allowed_battery_levels[closest_level];
+}
+
+void WindowScreen::is_nitro_battery_change(bool positive) {
+	this->generic_battery_change(positive, this->capture_status->is_battery_percentage, is_battery_levels, sizeof(is_battery_levels) / sizeof(is_battery_levels[0]));
+}
+
+void WindowScreen::is_nitro_ac_adapter_change() {
+	this->capture_status->is_ac_adapter_connected = !this->capture_status->is_ac_adapter_connected;
+}
+
+void WindowScreen::partner_ctr_battery_change(bool positive) {
+	this->generic_battery_change(positive, this->capture_status->partner_ctr_battery_percentage, partner_ctr_battery_levels, sizeof(partner_ctr_battery_levels) / sizeof(partner_ctr_battery_levels[0]));
+}
+
+void WindowScreen::partner_ctr_ac_adapter_connected_change() {
+	this->capture_status->partner_ctr_ac_adapter_connected = !this->capture_status->partner_ctr_ac_adapter_connected;
+}
+
+void WindowScreen::partner_ctr_ac_adapter_charging_change() {
+	this->capture_status->partner_ctr_ac_adapter_charging = !this->capture_status->partner_ctr_ac_adapter_charging;
+}
+
 void WindowScreen::padding_change() {
 	if(this->m_info.is_fullscreen)
 		return;
@@ -219,8 +288,9 @@ void WindowScreen::game_crop_enable_change() {
 void WindowScreen::crop_value_change(int new_crop_value, bool do_print_notification, bool do_cycle) {
 	std::vector<const CropData*> *crops = this->get_crop_data_vector(&this->m_info);
 	int *crop_value = this->get_crop_index_ptr(&this->m_info);
-	int new_value = new_crop_value % crops->size();
-	if((!do_cycle) && ((new_crop_value < 0) || (new_crop_value >= crops->size())))
+	int num_crops = (int)crops->size();
+	int new_value = new_crop_value % num_crops;
+	if((!do_cycle) && ((new_crop_value < 0) || (new_crop_value >= num_crops)))
 		new_value = 0;
 	if(new_value < 0)
 		new_value = 0;
@@ -262,6 +332,51 @@ void WindowScreen::par_value_change(int new_par_value, bool is_top) {
 	}
 }
 
+void WindowScreen::color_correction_value_change(int new_color_correction_value) {
+	int color_correction_index = new_color_correction_value % this->possible_color_profiles.size();
+	if(color_correction_index < 0)
+		color_correction_index = 0;
+	std::string setting_name = "Color Correction: ";
+	bool updated = false;
+	if(this->m_info.top_color_correction != color_correction_index)
+		updated = true;
+	this->m_info.top_color_correction = color_correction_index;
+	if(this->m_info.bot_color_correction != color_correction_index)
+		updated = true;
+	this->m_info.bot_color_correction = color_correction_index;
+	if(updated)
+		this->print_notification(setting_name + this->possible_color_profiles[color_correction_index]->name);
+}
+
+void WindowScreen::request_3d_change() {
+	bool updated = update_3d_enabled(this->capture_status);
+	if(updated) {
+		this->prepare_size_ratios(false, false);
+		this->future_operations.call_crop = true;
+	}
+}
+
+void WindowScreen::interleaved_3d_change() {
+	this->display_data->interleaved_3d = !this->display_data->interleaved_3d;
+	bool updated = get_3d_enabled(this->capture_status);
+	if(updated) {
+		this->prepare_size_ratios(false, false);
+		this->future_operations.call_crop = true;
+	}
+}
+
+void WindowScreen::squish_3d_change(bool is_top) {
+	if(is_top)
+		this->m_info.squish_3d_top = !this->m_info.squish_3d_top;
+	else
+		this->m_info.squish_3d_bot = !this->m_info.squish_3d_bot;
+	bool updated = get_3d_enabled(this->capture_status);
+	if(updated) {
+		this->prepare_size_ratios(false, false);
+		this->future_operations.call_screen_settings_update = true;
+	}
+}
+
 void WindowScreen::offset_change(float &value, float change) {
 	if(change >= 1.0)
 		return;
@@ -286,6 +401,11 @@ void WindowScreen::offset_change(float &value, float change) {
 	this->future_operations.call_screen_settings_update = true;
 }
 
+void WindowScreen::audio_device_change(audio_output_device_data new_device_data) {
+	this->audio_data->set_audio_output_device_data(new_device_data);
+	this->print_notification("Audio device changed");
+}
+
 void WindowScreen::menu_scaling_change(bool positive) {
 	double old_scaling = this->m_info.menu_scaling_factor;
 	if(positive)
@@ -297,7 +417,7 @@ void WindowScreen::menu_scaling_change(bool positive) {
 	if(this->m_info.menu_scaling_factor > 9.95)
 		this->m_info.menu_scaling_factor = 10.0;
 	if(old_scaling != this->m_info.menu_scaling_factor) {
-		this->print_notification_float("Menu Scaling", this->m_info.menu_scaling_factor, 1);
+		this->print_notification_float("Menu Scaling", (float)this->m_info.menu_scaling_factor, 1);
 	}
 }
 
@@ -305,16 +425,24 @@ void WindowScreen::window_scaling_change(bool positive) {
 	if(this->m_info.is_fullscreen)
 		return;
 	double old_scaling = this->m_info.scaling;
+	double closest_foor_scaling = std::floor(old_scaling / WINDOW_SCALING_CHANGE) * WINDOW_SCALING_CHANGE;
+	double closest_ceil_scaling = std::ceil(old_scaling / WINDOW_SCALING_CHANGE) * WINDOW_SCALING_CHANGE;
+	double greater_scaling = old_scaling + WINDOW_SCALING_CHANGE;
+	double lower_scaling = old_scaling - WINDOW_SCALING_CHANGE;
+	if(closest_foor_scaling != closest_ceil_scaling) {
+		greater_scaling = closest_ceil_scaling;
+		lower_scaling = closest_foor_scaling;
+	}
 	if(positive)
-		this->m_info.scaling += 0.5;
+		this->m_info.scaling = greater_scaling;
 	else
-		this->m_info.scaling -= 0.5;
-	if (this->m_info.scaling < 1.25)
-		this->m_info.scaling = 1.0;
-	if (this->m_info.scaling > 44.75)
-		this->m_info.scaling = 45.0;
+		this->m_info.scaling = lower_scaling;
+	if (this->m_info.scaling < (MIN_WINDOW_SCALING_VALUE + (WINDOW_SCALING_CHANGE / 2)))
+		this->m_info.scaling = MIN_WINDOW_SCALING_VALUE;
+	if (this->m_info.scaling > (MAX_WINDOW_SCALING_VALUE - (WINDOW_SCALING_CHANGE / 2)))
+		this->m_info.scaling = MAX_WINDOW_SCALING_VALUE;
 	if(old_scaling != this->m_info.scaling) {
-		this->print_notification_float("Scaling", this->m_info.scaling, 1);
+		this->print_notification_float("Scaling", (float)this->m_info.scaling, 1);
 		this->future_operations.call_screen_settings_update = true;
 	}
 }
@@ -326,6 +454,12 @@ void WindowScreen::rotation_change(int &value, bool right) {
 	value = (value + add_value) % 360;
 	this->prepare_size_ratios(false, false);
 	this->future_operations.call_rotate = true;
+}
+
+void WindowScreen::force_same_scaling_change() {
+	this->m_info.force_same_scaling = !this->m_info.force_same_scaling;
+	this->prepare_size_ratios(true, true);
+	this->future_operations.call_screen_settings_update = true;
 }
 
 void WindowScreen::ratio_change(bool top_priority, bool cycle) {
@@ -348,8 +482,33 @@ void WindowScreen::input_toggle_change(bool &target) {
 
 void WindowScreen::bottom_pos_change(int new_bottom_pos) {
 	BottomRelativePosition cast_new_bottom_pos = static_cast<BottomRelativePosition>(new_bottom_pos % BottomRelativePosition::BOT_REL_POS_END);
-	if(cast_new_bottom_pos != this->m_info.bottom_pos) {
-		this->m_info.bottom_pos = cast_new_bottom_pos;
+	bool updated = cast_new_bottom_pos != this->m_info.bottom_pos;
+	this->m_info.bottom_pos = cast_new_bottom_pos;
+	if(updated) {
+		this->prepare_size_ratios(false, false);
+		this->future_operations.call_screen_settings_update = true;
+	}
+}
+
+void WindowScreen::second_screen_3d_pos_change(int new_second_screen_3d_pos) {
+	SecondScreen3DRelativePosition cast_new_pos = static_cast<SecondScreen3DRelativePosition>(new_second_screen_3d_pos % SecondScreen3DRelativePosition::SECOND_SCREEN_3D_REL_POS_END);
+	SecondScreen3DRelativePosition prev_pos = get_second_screen_pos(&this->m_info, this->m_stype);
+	this->m_info.second_screen_pos = cast_new_pos;
+	SecondScreen3DRelativePosition curr_pos = get_second_screen_pos(&this->m_info, this->m_stype);
+	bool updated = get_3d_enabled(this->capture_status) && (prev_pos != curr_pos);
+
+	if(updated) {
+		this->prepare_size_ratios(false, false);
+		this->future_operations.call_screen_settings_update = true;
+	}
+}
+
+void WindowScreen::second_screen_3d_match_bottom_pos_change() {
+	SecondScreen3DRelativePosition prev_pos = get_second_screen_pos(&this->m_info, this->m_stype);
+	this->m_info.match_bottom_pos_and_second_screen_pos = !this->m_info.match_bottom_pos_and_second_screen_pos;
+	SecondScreen3DRelativePosition curr_pos = get_second_screen_pos(&this->m_info, this->m_stype);
+	bool updated = get_3d_enabled(this->capture_status) && (prev_pos != curr_pos);
+	if(updated) {
 		this->prepare_size_ratios(false, false);
 		this->future_operations.call_screen_settings_update = true;
 	}
@@ -397,6 +556,90 @@ void WindowScreen::frame_blending_mode_change(bool positive) {
 		change = FRAME_BLENDING_END - 1;
 	this->m_info.frame_blending_top = static_cast<FrameBlendingMode>((this->m_info.frame_blending_top + change) % FRAME_BLENDING_END);
 	this->m_info.frame_blending_bot = this->m_info.frame_blending_top;
+}
+
+void WindowScreen::separator_size_change(int change) {
+	if(this->m_stype != ScreenType::JOINT)
+		return;
+	int new_size = this->m_info.separator_pixel_size + change;
+	if(new_size < 0)
+		new_size = 0;
+	if(new_size > MAX_SEP_SIZE)
+		new_size = MAX_SEP_SIZE;
+	if(new_size != this->m_info.separator_pixel_size) {
+		this->m_info.separator_pixel_size = new_size;
+		this->prepare_size_ratios(true, true);
+		this->future_operations.call_screen_settings_update = true;
+	}
+}
+
+void WindowScreen::separator_multiplier_change(bool positive, float& multiplier_to_check, float lower_limit, float upper_limit) {
+	if(this->m_stype != ScreenType::JOINT)
+		return;
+	float change = WINDOW_SCALING_CHANGE;
+	if(!positive)
+		change = -WINDOW_SCALING_CHANGE;
+	float new_value = multiplier_to_check + change;
+	if(new_value < lower_limit)
+		new_value = lower_limit;
+	if(new_value > upper_limit)
+		new_value = upper_limit;
+	if(new_value != multiplier_to_check) {
+		multiplier_to_check = new_value;
+		this->prepare_size_ratios(true, true);
+		this->future_operations.call_screen_settings_update = true;
+	}
+}
+
+void WindowScreen::separator_windowed_multiplier_change(bool positive) {
+	if(this->m_info.is_fullscreen)
+		return;
+	this->separator_multiplier_change(positive, this->m_info.separator_windowed_multiplier, SEP_WINDOW_SCALING_MIN_MULTIPLIER, MAX_WINDOW_SCALING_VALUE);
+}
+
+void WindowScreen::separator_fullscreen_multiplier_change(bool positive) {
+	if(!this->m_info.is_fullscreen)
+		return;
+	this->separator_multiplier_change(positive, this->m_info.separator_fullscreen_multiplier, SEP_FULLSCREEN_SCALING_MIN_MULTIPLIER, MAX_WINDOW_SCALING_VALUE);
+}
+
+void WindowScreen::devices_allowed_change(PossibleCaptureDevices device) {
+	if((device < 0) || (device >= CC_POSSIBLE_DEVICES_END))
+		return;
+	this->capture_status->devices_allowed_scan[device] = !this->capture_status->devices_allowed_scan[device];
+}
+
+void WindowScreen::input_video_data_format_request_change(bool positive) {
+	std::chrono::time_point<std::chrono::high_resolution_clock> curr_time = std::chrono::high_resolution_clock::now();
+	const std::chrono::duration<double> diff = curr_time - this->last_data_format_change_time;
+	if(diff.count() < this->input_data_format_change_timeout)
+		return;
+	this->capture_status->request_low_bw_format = !this->capture_status->request_low_bw_format;
+	this->print_notification("Changing data format...\nPlease wait...");
+	this->last_data_format_change_time = curr_time;
+}
+
+bool WindowScreen::add_new_cc_key(std::string key, CaptureConnectionType conn_type, bool discriminator) {
+	bool ret = false;
+	KeySaveError save_error = save_cc_key(key, conn_type, discriminator);
+	switch(save_error) {
+		case KEY_SAVE_METHOD_NOT_FOUND:
+			this->print_notification("Key saving method missing", TEXT_KIND_ERROR);
+			break;
+		case KEY_INVALID:
+			this->print_notification("Key invalid", TEXT_KIND_ERROR);
+			break;
+		case KEY_ALREADY_PRESENT:
+			this->print_notification("Key already present", TEXT_KIND_WARNING);
+			break;
+		case KEY_SAVED:
+			this->print_notification("Key saved successfully");
+			ret = true;
+			break;
+		default:
+			break;
+	}
+	return ret;
 }
 
 bool WindowScreen::can_execute_cmd(const WindowCommand* window_cmd, bool is_extra, bool is_always) {
@@ -541,6 +784,10 @@ bool WindowScreen::common_poll(SFEvent &event_data) {
 			break;
 
 		case EVENT_TEXT_ENTERED:
+			if(this->has_menu_textbox()) {
+				consumed = false;
+				break;
+			}
 			switch(event_data.unicode) {
 				case 's':
 					this->execute_cmd(WINDOW_COMMAND_SPLIT);
@@ -662,20 +909,38 @@ bool WindowScreen::can_setup_menu() {
 	return diff.count() > this->menu_change_timeout;
 }
 
+void WindowScreen::switch_to_menu(CurrMenuType new_menu_type, GenericMenu* new_menu, bool reset_data, bool update_last_menu_change_time) {
+	if((this->curr_menu != new_menu_type) && (this->curr_menu_ptr != NULL))
+		this->curr_menu_ptr->on_menu_unloaded();
+	this->curr_menu = new_menu_type;
+	this->curr_menu_ptr = new_menu;
+	if(this->curr_menu_ptr != NULL)
+		this->curr_menu_ptr->reset_data(reset_data);
+	if(update_last_menu_change_time)
+		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
+}
+
 void WindowScreen::setup_no_menu() {
-	this->curr_menu = DEFAULT_MENU_TYPE;
-	this->last_menu_change_time = std::chrono::high_resolution_clock::now();
+	this->switch_to_menu(DEFAULT_MENU_TYPE, NULL);
+}
+
+void WindowScreen::setup_connection_menu(std::vector<CaptureDevice> *devices_list, bool reset_data) {
+	// Skip the check here. It's special.
+	this->switch_to_menu(CONNECT_MENU_TYPE, this->connection_menu, reset_data);
+	this->connection_menu->insert_data(devices_list);
+}
+
+void WindowScreen::setup_reconnection_menu(bool reset_data) {
+	// Skip the check here. It's special.
+	this->switch_to_menu(RECONNECT_MENU_TYPE, NULL, reset_data);
 }
 
 void WindowScreen::setup_main_menu(bool reset_data, bool skip_setup_check) {
 	if((!skip_setup_check) && (!this->can_setup_menu()))
 		return;
 	if(this->curr_menu != MAIN_MENU_TYPE) {
-		this->curr_menu = MAIN_MENU_TYPE;
-		if(reset_data)
-			this->main_menu->reset_data();
-		this->main_menu->insert_data(this->m_stype, this->m_info.is_fullscreen, this->display_data->mono_app_mode, this->capture_status->device.cc_type, this->capture_status->connected);
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
+		this->switch_to_menu(MAIN_MENU_TYPE, this->main_menu, reset_data);
+		this->main_menu->insert_data(this->m_stype, this->m_info.is_fullscreen, this->display_data->mono_app_mode, &this->capture_status->device, this->capture_status->connected);
 	}
 }
 
@@ -683,11 +948,19 @@ void WindowScreen::setup_input_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != INPUT_MENU_TYPE) {
-		this->curr_menu = INPUT_MENU_TYPE;
-		if(reset_data)
-			this->input_menu->reset_data();
+		this->switch_to_menu(INPUT_MENU_TYPE, this->input_menu, reset_data);
 		this->input_menu->insert_data(is_shortcut_valid(), are_extra_buttons_usable());
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
+	}
+}
+
+void WindowScreen::setup_audio_devices_menu(bool reset_data){
+	if(!this->can_setup_menu())
+		return;
+	if(this->curr_menu != AUDIO_DEVICE_MENU_TYPE) {
+		this->possible_audio_devices.clear();
+		this->possible_audio_devices = sf::PlaybackDevice::getAvailableDevices();
+		this->switch_to_menu(AUDIO_DEVICE_MENU_TYPE, this->audio_device_menu, reset_data);
+		this->audio_device_menu->insert_data(&this->possible_audio_devices);
 	}
 }
 
@@ -695,11 +968,8 @@ void WindowScreen::setup_video_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != VIDEO_MENU_TYPE) {
-		this->curr_menu = VIDEO_MENU_TYPE;
-		if(reset_data)
-			this->video_menu->reset_data();
+		this->switch_to_menu(VIDEO_MENU_TYPE, this->video_menu, reset_data);
 		this->video_menu->insert_data(this->m_stype, this->m_info.is_fullscreen, (!this->m_info.is_fullscreen) || this->m_info.failed_fullscreen);
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -707,11 +977,8 @@ void WindowScreen::setup_crop_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != CROP_MENU_TYPE) {
-		this->curr_menu = CROP_MENU_TYPE;
-		if(reset_data)
-			this->crop_menu->reset_data();
+		this->switch_to_menu(CROP_MENU_TYPE, this->crop_menu, reset_data);
 		this->crop_menu->insert_data(this->get_crop_data_vector(&this->m_info));
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -722,9 +989,7 @@ void WindowScreen::setup_par_menu(bool is_top, bool reset_data) {
 	if(!is_top)
 		wanted_type = BOTTOM_PAR_MENU_TYPE;
 	if(this->curr_menu != wanted_type) {
-		this->curr_menu = wanted_type;
-		if(reset_data)
-			this->par_menu->reset_data();
+		this->switch_to_menu(wanted_type, this->par_menu, reset_data);
 		std::string title_piece = "";
 		if((is_top) && (this->m_stype == ScreenType::JOINT))
 			title_piece = "Top";
@@ -732,7 +997,6 @@ void WindowScreen::setup_par_menu(bool is_top, bool reset_data) {
 			title_piece = "Bot.";
 		this->par_menu->setup_title(title_piece);
 		this->par_menu->insert_data(&this->possible_pars);
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -740,11 +1004,8 @@ void WindowScreen::setup_offset_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != OFFSET_MENU_TYPE) {
-		this->curr_menu = OFFSET_MENU_TYPE;
-		if(reset_data)
-			this->offset_menu->reset_data();
+		this->switch_to_menu(OFFSET_MENU_TYPE, this->offset_menu, reset_data);
 		this->offset_menu->insert_data();
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -752,11 +1013,8 @@ void WindowScreen::setup_rotation_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != ROTATION_MENU_TYPE) {
-		this->curr_menu = ROTATION_MENU_TYPE;
-		if(reset_data)
-			this->rotation_menu->reset_data();
+		this->switch_to_menu(ROTATION_MENU_TYPE, this->rotation_menu, reset_data);
 		this->rotation_menu->insert_data();
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -764,11 +1022,8 @@ void WindowScreen::setup_audio_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != AUDIO_MENU_TYPE) {
-		this->curr_menu = AUDIO_MENU_TYPE;
-		if(reset_data)
-			this->audio_menu->reset_data();
+		this->switch_to_menu(AUDIO_MENU_TYPE, this->audio_menu, reset_data);
 		this->audio_menu->insert_data();
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -776,11 +1031,8 @@ void WindowScreen::setup_bfi_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != BFI_MENU_TYPE) {
-		this->curr_menu = BFI_MENU_TYPE;
-		if(reset_data)
-			this->bfi_menu->reset_data();
+		this->switch_to_menu(BFI_MENU_TYPE, this->bfi_menu, reset_data);
 		this->bfi_menu->insert_data();
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -800,18 +1052,18 @@ void WindowScreen::setup_fileconfig_menu(bool is_save, bool reset_data, bool ski
 			this->possible_files.push_back(file_data);
 		}
 		file_data.index = STARTUP_FILE_INDEX;
-		file_data.name = load_layout_name(file_data.index, success, this->created_proper_folder);
+		file_data.name = load_layout_name(file_data.index, success);
 		this->possible_files.push_back(file_data);
 		for(int i = 1; i <= 4; i++) {
 			file_data.index = i;
-			file_data.name = load_layout_name(file_data.index, success, this->created_proper_folder);
+			file_data.name = load_layout_name(file_data.index, success);
 			this->possible_files.push_back(file_data);
 		}
 		int first_free;
 		bool failed = false;
 		for(first_free = 5; first_free <= 100; first_free++) {
 			file_data.index = first_free;
-			file_data.name = load_layout_name(file_data.index, success, this->created_proper_folder);
+			file_data.name = load_layout_name(file_data.index, success);
 			if(!success) {
 				failed = true;
 				break;
@@ -821,16 +1073,12 @@ void WindowScreen::setup_fileconfig_menu(bool is_save, bool reset_data, bool ski
 		if(is_save && (!failed)) {
 			this->possible_files.erase(this->possible_files.begin());
 		}
-		this->curr_menu = wanted_type;
-		if(reset_data)
-			this->fileconfig_menu->reset_data();
+		this->switch_to_menu(wanted_type, this->fileconfig_menu, reset_data, !skip_setup_check);
 		std::string title_piece = "Load";
 		if(is_save)
 			title_piece = "Save";
 		this->fileconfig_menu->setup_title(title_piece);
 		this->fileconfig_menu->insert_data(&this->possible_files);
-		if(!skip_setup_check)
-			this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -843,22 +1091,19 @@ void WindowScreen::setup_resolution_menu(bool reset_data) {
 		if(modes.size() > 0) {
 			this->possible_resolutions.push_back(sf::VideoMode({0, 0}, 0));
 			this->possible_resolutions.push_back(modes[0]);
-			for(int i = 1; i < modes.size(); ++i)
+			for(size_t i = 1; i < modes.size(); ++i)
 				if(modes[0].bitsPerPixel == modes[i].bitsPerPixel)
 					this->possible_resolutions.push_back(modes[i]);
 		}
 		else {
 			this->print_notification("No Fullscreen resolution found", TEXT_KIND_WARNING);
-			for(int i = 0; i < (sizeof(default_fs_modes) / sizeof(default_fs_modes[0])); i++) {
+			for(size_t i = 0; i < (sizeof(default_fs_modes) / sizeof(default_fs_modes[0])); i++) {
 				this->possible_resolutions.push_back(*default_fs_modes[i]);
 			}
 		}
 		if(this->possible_resolutions.size() > 0) {
-			this->curr_menu = RESOLUTION_MENU_TYPE;
-			if(reset_data)
-				this->resolution_menu->reset_data();
+			this->switch_to_menu(RESOLUTION_MENU_TYPE, this->resolution_menu, reset_data);
 			this->resolution_menu->insert_data(&this->possible_resolutions, sf::VideoMode::getDesktopMode());
-			this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 		}
 	}
 }
@@ -867,11 +1112,8 @@ void WindowScreen::setup_extra_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != EXTRA_MENU_TYPE) {
-		this->curr_menu = EXTRA_MENU_TYPE;
-		if(reset_data)
-			this->extra_menu->reset_data();
-		this->extra_menu->insert_data(this->m_stype, this->m_info.is_fullscreen);
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
+		this->switch_to_menu(EXTRA_MENU_TYPE, this->extra_menu, reset_data);
+		this->extra_menu->insert_data(this->m_stype, this->m_info.is_fullscreen, this->display_data->mono_app_mode);
 	}
 }
 
@@ -879,13 +1121,10 @@ void WindowScreen::setup_action_selection_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != ACTION_SELECTION_MENU_TYPE) {
-		this->curr_menu = ACTION_SELECTION_MENU_TYPE;
-		if(reset_data)
-			this->action_selection_menu->reset_data();
+		this->switch_to_menu(ACTION_SELECTION_MENU_TYPE, this->action_selection_menu, reset_data);
 		this->possible_actions.clear();
 		create_window_commands_list(this->possible_actions, this->possible_buttons_extras[this->chosen_button] && this->display_data->mono_app_mode);
 		this->action_selection_menu->insert_data(this->possible_actions);
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -895,9 +1134,7 @@ void WindowScreen::setup_shortcuts_menu(bool reset_data) {
 	if(!is_shortcut_valid())
 		return;
 	if(this->curr_menu != SHORTCUTS_MENU_TYPE) {
-		this->curr_menu = SHORTCUTS_MENU_TYPE;
-		if(reset_data)
-			this->shortcut_menu->reset_data();
+		this->switch_to_menu(SHORTCUTS_MENU_TYPE, this->shortcut_menu, reset_data);
 		this->possible_buttons_names.clear();
 		this->possible_buttons_ptrs.clear();
 		this->possible_buttons_extras.clear();
@@ -912,7 +1149,6 @@ void WindowScreen::setup_shortcuts_menu(bool reset_data) {
 			this->possible_buttons_extras.push_back(true);
 		}
 		this->shortcut_menu->insert_data(this->possible_buttons_names);
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -920,11 +1156,8 @@ void WindowScreen::setup_status_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != STATUS_MENU_TYPE) {
-		this->curr_menu = STATUS_MENU_TYPE;
-		if(reset_data)
-			this->status_menu->reset_data();
+		this->switch_to_menu(STATUS_MENU_TYPE, this->status_menu, reset_data);
 		this->status_menu->insert_data();
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -932,11 +1165,8 @@ void WindowScreen::setup_licenses_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != LICENSES_MENU_TYPE) {
-		this->curr_menu = LICENSES_MENU_TYPE;
-		if(reset_data)
-			this->license_menu->reset_data();
+		this->switch_to_menu(LICENSES_MENU_TYPE, this->license_menu, reset_data);
 		this->license_menu->insert_data();
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -944,11 +1174,8 @@ void WindowScreen::setup_relative_pos_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != RELATIVE_POS_MENU_TYPE) {
-		this->curr_menu = RELATIVE_POS_MENU_TYPE;
-		if(reset_data)
-			this->relpos_menu->reset_data();
+		this->switch_to_menu(RELATIVE_POS_MENU_TYPE, this->relpos_menu, reset_data);
 		this->relpos_menu->insert_data();
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -956,11 +1183,8 @@ void WindowScreen::setup_scaling_ratio_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != SCALING_RATIO_MENU_TYPE) {
-		this->curr_menu = SCALING_RATIO_MENU_TYPE;
-		if(reset_data)
-			this->scaling_ratio_menu->reset_data();
+		this->switch_to_menu(SCALING_RATIO_MENU_TYPE, this->scaling_ratio_menu, reset_data);
 		this->scaling_ratio_menu->insert_data();
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
 	}
 }
 
@@ -968,11 +1192,17 @@ void WindowScreen::setup_is_nitro_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != ISN_MENU_TYPE) {
-		this->curr_menu = ISN_MENU_TYPE;
-		if(reset_data)
-			this->is_nitro_menu->reset_data();
+		this->switch_to_menu(ISN_MENU_TYPE, this->is_nitro_menu, reset_data);
 		this->is_nitro_menu->insert_data(&this->capture_status->device);
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
+	}
+}
+
+void WindowScreen::setup_partner_ctr_menu(bool reset_data) {
+	if(!this->can_setup_menu())
+		return;
+	if(this->curr_menu != PARTNER_CTR_MENU_TYPE) {
+		this->switch_to_menu(PARTNER_CTR_MENU_TYPE, this->partner_ctr_menu, reset_data);
+		this->partner_ctr_menu->insert_data(&this->capture_status->device);
 	}
 }
 
@@ -980,11 +1210,71 @@ void WindowScreen::setup_video_effects_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
 	if(this->curr_menu != VIDEO_EFFECTS_MENU_TYPE) {
-		this->curr_menu = VIDEO_EFFECTS_MENU_TYPE;
-		if(reset_data)
-			this->video_effects_menu->reset_data();
+		this->switch_to_menu(VIDEO_EFFECTS_MENU_TYPE, this->video_effects_menu, reset_data);
 		this->video_effects_menu->insert_data();
-		this->last_menu_change_time = std::chrono::high_resolution_clock::now();
+	}
+}
+
+void WindowScreen::setup_separator_menu(bool reset_data) {
+	if(!this->can_setup_menu())
+		return;
+	if(this->curr_menu != SEPARATOR_MENU_TYPE) {
+		this->switch_to_menu(SEPARATOR_MENU_TYPE, this->separator_menu, reset_data);
+		this->separator_menu->insert_data(this->m_info.is_fullscreen);
+	}
+}
+
+void WindowScreen::setup_color_correction_menu(bool reset_data) {
+	if(!this->can_setup_menu())
+		return;
+	if(this->curr_menu != COLOR_CORRECTION_MENU_TYPE) {
+		this->switch_to_menu(COLOR_CORRECTION_MENU_TYPE, this->color_correction_menu, reset_data);
+		this->color_correction_menu->insert_data(&this->possible_color_profiles);
+	}
+}
+
+void WindowScreen::setup_main_3d_menu(bool reset_data) {
+	if(!this->can_setup_menu())
+		return;
+	if(this->curr_menu != MAIN_3D_MENU_TYPE) {
+		this->switch_to_menu(MAIN_3D_MENU_TYPE, this->main_3d_menu, reset_data);
+		this->main_3d_menu->insert_data(this->m_stype);
+	}
+}
+
+void WindowScreen::setup_second_screen_3d_relpos_menu(bool reset_data) {
+	if(!this->can_setup_menu())
+		return;
+	if(this->curr_menu != SECOND_SCREEN_RELATIVE_POS_MENU_TYPE) {
+		this->switch_to_menu(SECOND_SCREEN_RELATIVE_POS_MENU_TYPE, this->second_screen_3d_relpos_menu, reset_data);
+		this->second_screen_3d_relpos_menu->insert_data(this->m_stype);
+	}
+}
+
+void WindowScreen::setup_usb_conflict_resolution_menu(bool reset_data) {
+	if(!this->can_setup_menu())
+		return;
+	if(this->curr_menu != USB_CONFLICT_RESOLUTION_MENU_TYPE) {
+		this->switch_to_menu(USB_CONFLICT_RESOLUTION_MENU_TYPE, this->usb_conflict_resolution_menu, reset_data);
+		this->usb_conflict_resolution_menu->insert_data();
+	}
+}
+
+void WindowScreen::setup_optimize_3ds_menu(bool reset_data) {
+	if(!this->can_setup_menu())
+		return;
+	if(this->curr_menu != OPTIMIZE_3DS_MENU_TYPE) {
+		this->switch_to_menu(OPTIMIZE_3DS_MENU_TYPE, this->optimize_3ds_menu, reset_data);
+		this->optimize_3ds_menu->insert_data(&this->capture_status->device);
+	}
+}
+
+void WindowScreen::setup_optimize_serial_key_add_menu(bool reset_data) {
+	if(!this->can_setup_menu())
+		return;
+	if(this->curr_menu != OPTIMIZE_SERIAL_KEY_ADD_MENU_TYPE) {
+		this->switch_to_menu(OPTIMIZE_SERIAL_KEY_ADD_MENU_TYPE, this->optimize_serial_key_add_menu, reset_data);
+		this->optimize_serial_key_add_menu->insert_data(&this->capture_status->device);
 	}
 }
 
@@ -995,15 +1285,17 @@ void WindowScreen::update_save_menu() {
 	}
 }
 
+bool WindowScreen::has_menu_textbox() {
+	if(this->loaded_menu_ptr == NULL)
+		return false;
+	return this->loaded_menu_ptr->is_inside_textbox;
+}
+
 bool WindowScreen::no_menu_poll(SFEvent &event_data) {
 	bool consumed = true;
 	switch(event_data.type) {
 		case EVENT_TEXT_ENTERED:
-			switch(event_data.unicode) {
-				default:
-					consumed = false;
-					break;
-			}
+			consumed = false;
 			break;
 		case EVENT_KEY_PRESSED:
 			switch(event_data.code) {
@@ -1072,6 +1364,10 @@ bool WindowScreen::main_poll(SFEvent &event_data) {
 	bool consumed = true;
 	switch(event_data.type) {
 		case EVENT_TEXT_ENTERED:
+			if(this->has_menu_textbox()) {
+				consumed = false;
+				break;
+			}
 			switch(event_data.unicode) {
 				case 'c':
 					this->execute_cmd(WINDOW_COMMAND_CROP);
@@ -1251,729 +1547,941 @@ void WindowScreen::poll(bool do_everything) {
 				done = true;
 			continue;
 		}
-		if(this->loaded_menu != CONNECT_MENU_TYPE) {
+		if((this->loaded_menu != CONNECT_MENU_TYPE) && (this->loaded_menu != RECONNECT_MENU_TYPE)) {
 			if(this->main_poll(event_data))
 				continue;
 		}
+		if((this->loaded_menu == DEFAULT_MENU_TYPE) || (this->loaded_menu_ptr == NULL)) {
+			if(this->loaded_menu != RECONNECT_MENU_TYPE)
+				this->no_menu_poll(event_data);
+			continue;
+		}
+		if(!this->loaded_menu_ptr->poll(event_data))
+			continue;
+
 		switch(this->loaded_menu) {
 			case DEFAULT_MENU_TYPE:
-				if(this->no_menu_poll(event_data))
-					continue;
 				break;
 			case CONNECT_MENU_TYPE:
-				if(this->connection_menu->poll(event_data)) {
-					if(this->check_connection_menu_result() != CONNECTION_MENU_NO_ACTION)
-						done = true;
-					continue;
-				}
+				if(this->check_connection_menu_result() != CONNECTION_MENU_NO_ACTION)
+					done = true;
+				break;
+			case RECONNECT_MENU_TYPE:
 				break;
 			case MAIN_MENU_TYPE:
-				if(this->main_menu->poll(event_data)) {
-					switch(this->main_menu->selected_index) {
-						case MAIN_MENU_OPEN:
-							this->m_prepare_open = true;
-							break;
-						case MAIN_MENU_CLOSE_MENU:
-							this->setup_no_menu();
-							done = true;
-							break;
-						case MAIN_MENU_QUIT_APPLICATION:
-							this->set_close(0);
-							this->setup_no_menu();
-							done = true;
-							break;
-						case MAIN_MENU_FULLSCREEN:
-							this->fullscreen_change();
-							done = true;
-							break;
-						case MAIN_MENU_SPLIT:
-							this->split_change();
-							done = true;
-							break;
-						case MAIN_MENU_VIDEO_SETTINGS:
-							this->setup_video_menu();
-							done = true;
-							break;
-						case MAIN_MENU_AUDIO_SETTINGS:
-							this->setup_audio_menu();
-							done = true;
-							break;
-						case MAIN_MENU_LOAD_PROFILES:
-							this->setup_fileconfig_menu(false);
-							done = true;
-							break;
-						case MAIN_MENU_SAVE_PROFILES:
-							this->setup_fileconfig_menu(true);
-							done = true;
-							break;
-						case MAIN_MENU_STATUS:
-							this->setup_status_menu();
-							done = true;
-							break;
-						case MAIN_MENU_LICENSES:
-							this->setup_licenses_menu();
-							done = true;
-							break;
-						case MAIN_MENU_EXTRA_SETTINGS:
-							this->setup_extra_menu();
-							done = true;
-							break;
-						case MAIN_MENU_INPUT_SETTINGS:
-							this->setup_input_menu();
-							done = true;
-							break;
-						case MAIN_MENU_ISN_SETTINGS:
-							this->setup_is_nitro_menu();
-							done = true;
-							break;
-						case MAIN_MENU_SHUTDOWN:
-							this->set_close(1);
-							this->setup_no_menu();
-							done = true;
-							break;
-						default:
-							break;
-					}
-					this->main_menu->reset_output_option();
-					continue;
+				switch(this->main_menu->selected_index) {
+					case MAIN_MENU_OPEN:
+						this->m_prepare_open = true;
+						break;
+					case MAIN_MENU_CLOSE_MENU:
+						this->setup_no_menu();
+						done = true;
+						break;
+					case MAIN_MENU_QUIT_APPLICATION:
+						this->set_close(0);
+						this->setup_no_menu();
+						done = true;
+						break;
+					case MAIN_MENU_FULLSCREEN:
+						this->fullscreen_change();
+						done = true;
+						break;
+					case MAIN_MENU_SPLIT:
+						this->split_change();
+						done = true;
+						break;
+					case MAIN_MENU_VIDEO_SETTINGS:
+						this->setup_video_menu();
+						done = true;
+						break;
+					case MAIN_MENU_AUDIO_SETTINGS:
+						this->setup_audio_menu();
+						done = true;
+						break;
+					case MAIN_MENU_LOAD_PROFILES:
+						this->setup_fileconfig_menu(false);
+						done = true;
+						break;
+					case MAIN_MENU_SAVE_PROFILES:
+						this->setup_fileconfig_menu(true);
+						done = true;
+						break;
+					case MAIN_MENU_STATUS:
+						this->setup_status_menu();
+						done = true;
+						break;
+					case MAIN_MENU_LICENSES:
+						this->setup_licenses_menu();
+						done = true;
+						break;
+					case MAIN_MENU_EXTRA_SETTINGS:
+						this->setup_extra_menu();
+						done = true;
+						break;
+					case MAIN_MENU_INPUT_SETTINGS:
+						this->setup_input_menu();
+						done = true;
+						break;
+					case MAIN_MENU_IST_SETTINGS:
+					case MAIN_MENU_ISN_SETTINGS:
+						this->setup_is_nitro_menu();
+						done = true;
+						break;
+					case MAIN_MENU_OPTIMIZE_3DS_SETTINGS:
+						this->setup_optimize_3ds_menu();
+						done = true;
+						break;
+					case MAIN_MENU_PARTNER_CTR_SETTINGS:
+						this->setup_partner_ctr_menu();
+						done = true;
+						break;
+					case MAIN_MENU_SHUTDOWN:
+						this->set_close(1);
+						this->setup_no_menu();
+						done = true;
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case AUDIO_MENU_TYPE:
-				if(this->audio_menu->poll(event_data)) {
-					switch(this->audio_menu->selected_index) {
-						case AUDIO_MENU_BACK:
-							this->setup_main_menu(false);
-							done = true;
-							break;
-						case AUDIO_MENU_NO_ACTION:
-							break;
-						case AUDIO_MENU_VOLUME_DEC:
-							this->audio_data->change_audio_volume(false);
-							break;
-						case AUDIO_MENU_VOLUME_INC:
-							this->audio_data->change_audio_volume(true);
-							break;
-						case AUDIO_MENU_MAX_LATENCY_DEC:
-							this->audio_data->change_max_audio_latency(false);
-							break;
-						case AUDIO_MENU_MAX_LATENCY_INC:
-							this->audio_data->change_max_audio_latency(true);
-							break;
-						case AUDIO_MENU_OUTPUT_DEC:
-							this->audio_data->change_audio_output_type(false);
-							break;
-						case AUDIO_MENU_OUTPUT_INC:
-							this->audio_data->change_audio_output_type(true);
-							break;
-						case AUDIO_MENU_MUTE:
-							this->audio_data->change_audio_mute();
-							break;
-						case AUDIO_MENU_RESTART:
-							this->audio_data->request_audio_restart();
-							break;
-						default:
-							break;
-					}
-					this->audio_menu->reset_output_option();
-					continue;
+				switch(this->audio_menu->selected_index) {
+					case AUDIO_MENU_BACK:
+						this->setup_main_menu(false);
+						done = true;
+						break;
+					case AUDIO_MENU_NO_ACTION:
+						break;
+					case AUDIO_MENU_VOLUME_DEC:
+						this->audio_data->change_audio_volume(false);
+						break;
+					case AUDIO_MENU_VOLUME_INC:
+						this->audio_data->change_audio_volume(true);
+						break;
+					case AUDIO_MENU_MAX_LATENCY_DEC:
+						this->audio_data->change_max_audio_latency(false);
+						break;
+					case AUDIO_MENU_MAX_LATENCY_INC:
+						this->audio_data->change_max_audio_latency(true);
+						break;
+					case AUDIO_MENU_OUTPUT_DEC:
+						this->audio_data->change_audio_output_type(false);
+						break;
+					case AUDIO_MENU_OUTPUT_INC:
+						this->audio_data->change_audio_output_type(true);
+						break;
+					case AUDIO_MENU_MODE_DEC:
+						this->audio_data->change_audio_mode_output(false);
+						break;
+					case AUDIO_MENU_MODE_INC:
+						this->audio_data->change_audio_mode_output(true);
+						break;
+					case AUDIO_MENU_MUTE:
+						this->audio_data->change_audio_mute();
+						break;
+					case AUDIO_MENU_RESTART:
+						this->audio_data->request_audio_restart();
+						break;
+					case AUDIO_MENU_AUTO_SCAN:
+						this->audio_data->change_auto_device_scan();
+						break;
+					case AUDIO_MENU_CHANGE_DEVICE:
+						this->setup_audio_devices_menu();
+						done = true;
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case SAVE_MENU_TYPE:
-				if(this->fileconfig_menu->poll(event_data)) {
-					switch(this->fileconfig_menu->selected_index) {
-						case FILECONFIG_MENU_BACK:
-							this->setup_main_menu(false);
-							done = true;
-							break;
-						case FILECONFIG_MENU_NO_ACTION:
-							break;
-						case CREATE_NEW_FILE_INDEX:
-							this->m_prepare_save = this->possible_files[this->possible_files.size() - 1].index + 1;
-							done = true;
-							break;
-						default:
-							this->m_prepare_save = this->fileconfig_menu->selected_index;
-							done = true;
-							break;
-					}
-					this->fileconfig_menu->reset_output_option();
-					continue;
+				switch(this->fileconfig_menu->selected_index) {
+					case FILECONFIG_MENU_BACK:
+						this->setup_main_menu(false);
+						done = true;
+						break;
+					case FILECONFIG_MENU_NO_ACTION:
+						break;
+					case CREATE_NEW_FILE_INDEX:
+						this->m_prepare_save = this->possible_files[this->possible_files.size() - 1].index + 1;
+						done = true;
+						break;
+					default:
+						this->m_prepare_save = this->fileconfig_menu->selected_index;
+						done = true;
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case LOAD_MENU_TYPE:
-				if(this->fileconfig_menu->poll(event_data)) {
-					switch(this->fileconfig_menu->selected_index) {
-						case FILECONFIG_MENU_BACK:
-							this->setup_main_menu(false);
-							done = true;
-							break;
-						case FILECONFIG_MENU_NO_ACTION:
-							break;
-						default:
-							this->m_prepare_load = this->fileconfig_menu->selected_index;
-							done = true;
-							break;
-					}
-					this->fileconfig_menu->reset_output_option();
-					continue;
+				switch(this->fileconfig_menu->selected_index) {
+					case FILECONFIG_MENU_BACK:
+						this->setup_main_menu(false);
+						done = true;
+						break;
+					case FILECONFIG_MENU_NO_ACTION:
+						break;
+					default:
+						this->m_prepare_load = this->fileconfig_menu->selected_index;
+						done = true;
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case VIDEO_MENU_TYPE:
-				if(this->video_menu->poll(event_data)) {
-					switch(this->video_menu->selected_index) {
-						case VIDEO_MENU_BACK:
-							this->setup_main_menu(false);
-							done = true;
-							break;
-						case VIDEO_MENU_VSYNC:
-							this->vsync_change();
-							break;
-						case VIDEO_MENU_ASYNC:
-							this->async_change();
-							break;
-						case VIDEO_MENU_BLUR:
-							this->blur_change();
-							break;
-						//case VIDEO_MENU_FAST_POLL:
-						//	this->fast_poll_change();
-						//	break;
-						case VIDEO_MENU_PADDING:
-							this->padding_change();
-							break;
-						case VIDEO_MENU_CROPPING:
-							this->setup_crop_menu();
-							done = true;
-							break;
-						case VIDEO_MENU_TOP_PAR:
-							this->setup_par_menu(true);
-							done = true;
-							break;
-						case VIDEO_MENU_BOT_PAR:
-							this->setup_par_menu(false);
-							done = true;
-							break;
-						case VIDEO_MENU_ONE_PAR:
-							this->setup_par_menu(this->m_stype == ScreenType::TOP);
-							done = true;
-							break;
-						case VIDEO_MENU_MENU_SCALING_DEC:
-							this->menu_scaling_change(false);
-							break;
-						case VIDEO_MENU_MENU_SCALING_INC:
-							this->menu_scaling_change(true);
-							break;
-						case VIDEO_MENU_WINDOW_SCALING_DEC:
-							this->window_scaling_change(false);
-							break;
-						case VIDEO_MENU_WINDOW_SCALING_INC:
-							this->window_scaling_change(true);
-							break;
-						case VIDEO_MENU_TOP_ROTATION_DEC:
-							this->rotation_change(this->m_info.top_rotation, false);
-							break;
-						case VIDEO_MENU_TOP_ROTATION_INC:
-							this->rotation_change(this->m_info.top_rotation, true);
-							break;
-						case VIDEO_MENU_BOTTOM_ROTATION_DEC:
-							this->rotation_change(this->m_info.bot_rotation, false);
-							break;
-						case VIDEO_MENU_BOTTOM_ROTATION_INC:
-							this->rotation_change(this->m_info.bot_rotation, true);
-							break;
-						case VIDEO_MENU_SMALL_SCREEN_OFFSET_DEC:
-							this->offset_change(this->m_info.subscreen_offset, -0.1);
-							break;
-						case VIDEO_MENU_SMALL_SCREEN_OFFSET_INC:
-							this->offset_change(this->m_info.subscreen_offset, 0.1);
-							break;
-						case VIDEO_MENU_ROTATION_SETTINGS:
-							this->setup_rotation_menu();
-							done = true;
-							break;
-						case VIDEO_MENU_OFFSET_SETTINGS:
-							this->setup_offset_menu();
-							done = true;
-							break;
-						case VIDEO_MENU_BFI_SETTINGS:
-							this->setup_bfi_menu();
-							done = true;
-							break;
-						case VIDEO_MENU_RESOLUTION_SETTINGS:
-							this->setup_resolution_menu();
-							done = true;
-							break;
-						case VIDEO_MENU_BOTTOM_SCREEN_POS:
-							this->setup_relative_pos_menu();
-							done = true;
-							break;
-						case VIDEO_MENU_GAMES_CROPPING:
-							this->game_crop_enable_change();
-							break;
-						case VIDEO_MENU_NON_INT_SCALING:
-							this->non_int_scaling_change(false);
-							break;
-						case VIDEO_MENU_SCALING_RATIO_SETTINGS:
-							this->setup_scaling_ratio_menu();
-							break;
-						case VIDEO_MENU_CHANGE_TITLEBAR:
-							this->titlebar_change();
-							break;
-						case VIDEO_MENU_VIDEO_EFFECTS_SETTINGS:
-							this->setup_video_effects_menu();
-							break;
-						default:
-							break;
-					}
-					this->video_menu->reset_output_option();
-					continue;
+				switch(this->video_menu->selected_index) {
+					case VIDEO_MENU_BACK:
+						this->setup_main_menu(false);
+						done = true;
+						break;
+					case VIDEO_MENU_VSYNC:
+						this->vsync_change();
+						break;
+					case VIDEO_MENU_ASYNC:
+						this->async_change();
+						break;
+					case VIDEO_MENU_BLUR:
+						this->blur_change();
+						break;
+					//case VIDEO_MENU_FAST_POLL:
+					//	this->fast_poll_change();
+					//	break;
+					case VIDEO_MENU_PADDING:
+						this->padding_change();
+						break;
+					case VIDEO_MENU_CROPPING:
+						this->setup_crop_menu();
+						done = true;
+						break;
+					case VIDEO_MENU_TOP_PAR:
+						this->setup_par_menu(true);
+						done = true;
+						break;
+					case VIDEO_MENU_BOT_PAR:
+						this->setup_par_menu(false);
+						done = true;
+						break;
+					case VIDEO_MENU_ONE_PAR:
+						this->setup_par_menu(this->m_stype == ScreenType::TOP);
+						done = true;
+						break;
+					case VIDEO_MENU_MENU_SCALING_DEC:
+						this->menu_scaling_change(false);
+						break;
+					case VIDEO_MENU_MENU_SCALING_INC:
+						this->menu_scaling_change(true);
+						break;
+					case VIDEO_MENU_WINDOW_SCALING_DEC:
+						this->window_scaling_change(false);
+						break;
+					case VIDEO_MENU_WINDOW_SCALING_INC:
+						this->window_scaling_change(true);
+						break;
+					case VIDEO_MENU_TOP_ROTATION_DEC:
+						this->rotation_change(this->m_info.top_rotation, false);
+						break;
+					case VIDEO_MENU_TOP_ROTATION_INC:
+						this->rotation_change(this->m_info.top_rotation, true);
+						break;
+					case VIDEO_MENU_BOTTOM_ROTATION_DEC:
+						this->rotation_change(this->m_info.bot_rotation, false);
+						break;
+					case VIDEO_MENU_BOTTOM_ROTATION_INC:
+						this->rotation_change(this->m_info.bot_rotation, true);
+						break;
+					case VIDEO_MENU_SMALL_SCREEN_OFFSET_DEC:
+						this->offset_change(this->m_info.subscreen_offset, -0.1f);
+						break;
+					case VIDEO_MENU_SMALL_SCREEN_OFFSET_INC:
+						this->offset_change(this->m_info.subscreen_offset, 0.1f);
+						break;
+					case VIDEO_MENU_ROTATION_SETTINGS:
+						this->setup_rotation_menu();
+						done = true;
+						break;
+					case VIDEO_MENU_OFFSET_SETTINGS:
+						this->setup_offset_menu();
+						done = true;
+						break;
+					case VIDEO_MENU_BFI_SETTINGS:
+						this->setup_bfi_menu();
+						done = true;
+						break;
+					case VIDEO_MENU_RESOLUTION_SETTINGS:
+						this->setup_resolution_menu();
+						done = true;
+						break;
+					case VIDEO_MENU_BOTTOM_SCREEN_POS:
+						this->setup_relative_pos_menu();
+						done = true;
+						break;
+					case VIDEO_MENU_GAMES_CROPPING:
+						this->game_crop_enable_change();
+						break;
+					case VIDEO_MENU_NON_INT_SCALING:
+						this->non_int_scaling_change(false);
+						break;
+					case VIDEO_MENU_SCALING_RATIO_SETTINGS:
+						this->setup_scaling_ratio_menu();
+						break;
+					case VIDEO_MENU_CHANGE_TITLEBAR:
+						this->titlebar_change();
+						break;
+					case VIDEO_MENU_VIDEO_EFFECTS_SETTINGS:
+						this->setup_video_effects_menu();
+						break;
+					case VIDEO_MENU_SEPARATOR_SETTINGS:
+						this->setup_separator_menu();
+						break;
+					case VIDEO_MENU_3D_SETTINGS:
+						this->setup_main_3d_menu();
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case CROP_MENU_TYPE:
-				if(this->crop_menu->poll(event_data)) {
-					switch(this->crop_menu->selected_index) {
-						case CROP_MENU_BACK:
-							this->setup_video_menu(false);
-							done = true;
-							break;
-						case CROP_MENU_NO_ACTION:
-							break;
-						default:
-							this->crop_value_change(this->crop_menu->selected_index);
-							break;
-					}
-					this->crop_menu->reset_output_option();
-					continue;
+				switch(this->crop_menu->selected_index) {
+					case CROP_MENU_BACK:
+						this->setup_video_menu(false);
+						done = true;
+						break;
+					case CROP_MENU_NO_ACTION:
+						break;
+					default:
+						this->crop_value_change(this->crop_menu->selected_index);
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case TOP_PAR_MENU_TYPE:
-				if(this->par_menu->poll(event_data)) {
-					switch(this->par_menu->selected_index) {
-						case PAR_MENU_BACK:
-							this->setup_video_menu(false);
-							done = true;
-							break;
-						case PAR_MENU_NO_ACTION:
-							break;
-						default:
-							this->par_value_change(this->par_menu->selected_index, true);
-							break;
-					}
-					this->par_menu->reset_output_option();
-					continue;
+				switch(this->par_menu->selected_index) {
+					case PAR_MENU_BACK:
+						this->setup_video_menu(false);
+						done = true;
+						break;
+					case PAR_MENU_NO_ACTION:
+						break;
+					default:
+						this->par_value_change(this->par_menu->selected_index, true);
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case BOTTOM_PAR_MENU_TYPE:
-				if(this->par_menu->poll(event_data)) {
-					switch(this->par_menu->selected_index) {
-						case PAR_MENU_BACK:
-							this->setup_video_menu(false);
-							done = true;
-							break;
-						case PAR_MENU_NO_ACTION:
-							break;
-						default:
-							this->par_value_change(this->par_menu->selected_index, false);
-							break;
-					}
-					this->par_menu->reset_output_option();
-					continue;
+				switch(this->par_menu->selected_index) {
+					case PAR_MENU_BACK:
+						this->setup_video_menu(false);
+						done = true;
+						break;
+					case PAR_MENU_NO_ACTION:
+						break;
+					default:
+						this->par_value_change(this->par_menu->selected_index, false);
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case ROTATION_MENU_TYPE:
-				if(this->rotation_menu->poll(event_data)) {
-					switch(this->rotation_menu->selected_index) {
-						case ROTATION_MENU_BACK:
-							this->setup_video_menu(false);
-							done = true;
-							break;
-						case ROTATION_MENU_NO_ACTION:
-							break;
-						case ROTATION_MENU_TOP_ROTATION_DEC:
-							this->rotation_change(this->m_info.top_rotation, false);
-							break;
-						case ROTATION_MENU_TOP_ROTATION_INC:
-							this->rotation_change(this->m_info.top_rotation, true);
-							break;
-						case ROTATION_MENU_BOTTOM_ROTATION_DEC:
-							this->rotation_change(this->m_info.bot_rotation, false);
-							break;
-						case ROTATION_MENU_BOTTOM_ROTATION_INC:
-							this->rotation_change(this->m_info.bot_rotation, true);
-							break;
-						case ROTATION_MENU_BOTH_ROTATION_DEC:
-							this->rotation_change(this->m_info.top_rotation, false);
-							this->rotation_change(this->m_info.bot_rotation, false);
-							break;
-						case ROTATION_MENU_BOTH_ROTATION_INC:
-							this->rotation_change(this->m_info.top_rotation, true);
-							this->rotation_change(this->m_info.bot_rotation, true);
-							break;
-						default:
-							break;
-					}
-					this->rotation_menu->reset_output_option();
-					continue;
+				switch(this->rotation_menu->selected_index) {
+					case ROTATION_MENU_BACK:
+						this->setup_video_menu(false);
+						done = true;
+						break;
+					case ROTATION_MENU_NO_ACTION:
+						break;
+					case ROTATION_MENU_TOP_ROTATION_DEC:
+						this->rotation_change(this->m_info.top_rotation, false);
+						break;
+					case ROTATION_MENU_TOP_ROTATION_INC:
+						this->rotation_change(this->m_info.top_rotation, true);
+						break;
+					case ROTATION_MENU_BOTTOM_ROTATION_DEC:
+						this->rotation_change(this->m_info.bot_rotation, false);
+						break;
+					case ROTATION_MENU_BOTTOM_ROTATION_INC:
+						this->rotation_change(this->m_info.bot_rotation, true);
+						break;
+					case ROTATION_MENU_BOTH_ROTATION_DEC:
+						this->rotation_change(this->m_info.top_rotation, false);
+						this->rotation_change(this->m_info.bot_rotation, false);
+						break;
+					case ROTATION_MENU_BOTH_ROTATION_INC:
+						this->rotation_change(this->m_info.top_rotation, true);
+						this->rotation_change(this->m_info.bot_rotation, true);
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case OFFSET_MENU_TYPE:
-				if(this->offset_menu->poll(event_data)) {
-					switch(this->offset_menu->selected_index) {
-						case OFFSET_MENU_BACK:
-							this->setup_video_menu(false);
-							done = true;
-							break;
-						case OFFSET_MENU_NO_ACTION:
-							break;
-						case OFFSET_MENU_SMALL_OFFSET_DEC:
-							this->offset_change(this->m_info.subscreen_offset, -0.1);
-							break;
-						case OFFSET_MENU_SMALL_OFFSET_INC:
-							this->offset_change(this->m_info.subscreen_offset, 0.1);
-							break;
-						case OFFSET_MENU_SMALL_SCREEN_DISTANCE_DEC:
-							this->offset_change(this->m_info.subscreen_attached_offset, -0.1);
-							break;
-						case OFFSET_MENU_SMALL_SCREEN_DISTANCE_INC:
-							this->offset_change(this->m_info.subscreen_attached_offset, 0.1);
-							break;
-						case OFFSET_MENU_SCREENS_X_POS_DEC:
-							this->offset_change(this->m_info.total_offset_x, -0.1);
-							break;
-						case OFFSET_MENU_SCREENS_X_POS_INC:
-							this->offset_change(this->m_info.total_offset_x, 0.1);
-							break;
-						case OFFSET_MENU_SCREENS_Y_POS_DEC:
-							this->offset_change(this->m_info.total_offset_y, -0.1);
-							break;
-						case OFFSET_MENU_SCREENS_Y_POS_INC:
-							this->offset_change(this->m_info.total_offset_y, 0.1);
-							break;
-						default:
-							break;
-					}
-					this->offset_menu->reset_output_option();
-					continue;
+				switch(this->offset_menu->selected_index) {
+					case OFFSET_MENU_BACK:
+						this->setup_video_menu(false);
+						done = true;
+						break;
+					case OFFSET_MENU_NO_ACTION:
+						break;
+					case OFFSET_MENU_SMALL_OFFSET_DEC:
+						this->offset_change(this->m_info.subscreen_offset, -0.1f);
+						break;
+					case OFFSET_MENU_SMALL_OFFSET_INC:
+						this->offset_change(this->m_info.subscreen_offset, 0.1f);
+						break;
+					case OFFSET_MENU_SMALL_SCREEN_DISTANCE_DEC:
+						this->offset_change(this->m_info.subscreen_attached_offset, -0.1f);
+						break;
+					case OFFSET_MENU_SMALL_SCREEN_DISTANCE_INC:
+						this->offset_change(this->m_info.subscreen_attached_offset, 0.1f);
+						break;
+					case OFFSET_MENU_SCREENS_X_POS_DEC:
+						this->offset_change(this->m_info.total_offset_x, -0.1f);
+						break;
+					case OFFSET_MENU_SCREENS_X_POS_INC:
+						this->offset_change(this->m_info.total_offset_x, 0.1f);
+						break;
+					case OFFSET_MENU_SCREENS_Y_POS_DEC:
+						this->offset_change(this->m_info.total_offset_y, -0.1f);
+						break;
+					case OFFSET_MENU_SCREENS_Y_POS_INC:
+						this->offset_change(this->m_info.total_offset_y, 0.1f);
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case BFI_MENU_TYPE:
-				if(this->bfi_menu->poll(event_data)) {
-					switch(this->bfi_menu->selected_index) {
-						case BFI_MENU_BACK:
-							this->setup_video_menu(false);
-							done = true;
-							break;
-						case BFI_MENU_NO_ACTION:
-							break;
-						case BFI_MENU_TOGGLE:
-							this->bfi_change();
-							break;
-						case BFI_MENU_DIVIDER_DEC:
-							this->m_info.bfi_divider -= 1;
-							if(this->m_info.bfi_divider < 2)
-								this->m_info.bfi_divider = 2;
-							if(this->m_info.bfi_amount > (this->m_info.bfi_divider - 1))
-								this->m_info.bfi_amount = this->m_info.bfi_divider - 1;
-							break;
-						case BFI_MENU_DIVIDER_INC:
-							this->m_info.bfi_divider += 1;
-							if(this->m_info.bfi_divider > 10)
-								this->m_info.bfi_divider = 10;
-							break;
-						case BFI_MENU_AMOUNT_DEC:
-							this->m_info.bfi_amount -= 1;
-							if(this->m_info.bfi_amount < 1)
-								this->m_info.bfi_amount = 1;
-							break;
-						case BFI_MENU_AMOUNT_INC:
-							this->m_info.bfi_amount += 1;
-							if(this->m_info.bfi_amount > (this->m_info.bfi_divider - 1))
-								this->m_info.bfi_amount = this->m_info.bfi_divider - 1;
-							break;
-						default:
-							break;
-					}
-					this->bfi_menu->reset_output_option();
-					continue;
+				switch(this->bfi_menu->selected_index) {
+					case BFI_MENU_BACK:
+						this->setup_video_menu(false);
+						done = true;
+						break;
+					case BFI_MENU_NO_ACTION:
+						break;
+					case BFI_MENU_TOGGLE:
+						this->bfi_change();
+						break;
+					case BFI_MENU_DIVIDER_DEC:
+						this->m_info.bfi_divider -= 1;
+						if(this->m_info.bfi_divider < 2)
+							this->m_info.bfi_divider = 2;
+						if(this->m_info.bfi_amount > (this->m_info.bfi_divider - 1))
+							this->m_info.bfi_amount = this->m_info.bfi_divider - 1;
+						break;
+					case BFI_MENU_DIVIDER_INC:
+						this->m_info.bfi_divider += 1;
+						if(this->m_info.bfi_divider > 10)
+							this->m_info.bfi_divider = 10;
+						break;
+					case BFI_MENU_AMOUNT_DEC:
+						this->m_info.bfi_amount -= 1;
+						if(this->m_info.bfi_amount < 1)
+							this->m_info.bfi_amount = 1;
+						break;
+					case BFI_MENU_AMOUNT_INC:
+						this->m_info.bfi_amount += 1;
+						if(this->m_info.bfi_amount > (this->m_info.bfi_divider - 1))
+							this->m_info.bfi_amount = this->m_info.bfi_divider - 1;
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case RELATIVE_POS_MENU_TYPE:
-				if(this->relpos_menu->poll(event_data)) {
-					switch(this->relpos_menu->selected_index) {
-						case REL_POS_MENU_BACK:
-							this->setup_video_menu(false);
-							done = true;
-							break;
-						case REL_POS_MENU_NO_ACTION:
-							break;
-						case REL_POS_MENU_CONFIRM:
-							this->bottom_pos_change(this->relpos_menu->selected_confirm_value);
-							break;
-						default:
-							break;
-					}
-					this->relpos_menu->reset_output_option();
-					continue;
+				switch(this->relpos_menu->selected_index) {
+					case REL_POS_MENU_BACK:
+						this->setup_video_menu(false);
+						done = true;
+						break;
+					case REL_POS_MENU_NO_ACTION:
+						break;
+					case REL_POS_MENU_CONFIRM:
+						this->bottom_pos_change(this->relpos_menu->selected_confirm_value);
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case RESOLUTION_MENU_TYPE:
-				if(this->resolution_menu->poll(event_data)) {
-					switch(this->resolution_menu->selected_index) {
-						case RESOLUTION_MENU_BACK:
-							this->setup_video_menu(false);
-							done = true;
-							break;
-						case RESOLUTION_MENU_NO_ACTION:
-							break;
-						default:
-							this->m_info.fullscreen_mode_width = possible_resolutions[this->resolution_menu->selected_index].size.x;
-							this->m_info.fullscreen_mode_height = possible_resolutions[this->resolution_menu->selected_index].size.y;
-							this->m_info.fullscreen_mode_bpp = possible_resolutions[this->resolution_menu->selected_index].bitsPerPixel;
-							this->create_window(true);
-							break;
-					}
-					this->resolution_menu->reset_output_option();
-					continue;
+				switch(this->resolution_menu->selected_index) {
+					case RESOLUTION_MENU_BACK:
+						this->setup_video_menu(false);
+						done = true;
+						break;
+					case RESOLUTION_MENU_NO_ACTION:
+						break;
+					default:
+						this->m_info.fullscreen_mode_width = possible_resolutions[this->resolution_menu->selected_index].size.x;
+						this->m_info.fullscreen_mode_height = possible_resolutions[this->resolution_menu->selected_index].size.y;
+						this->m_info.fullscreen_mode_bpp = possible_resolutions[this->resolution_menu->selected_index].bitsPerPixel;
+						this->create_window(true);
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case EXTRA_MENU_TYPE:
-				if(this->extra_menu->poll(event_data)) {
-					switch(this->extra_menu->selected_index) {
-						case EXTRA_SETTINGS_MENU_BACK:
-							this->setup_main_menu(false);
-							done = true;
-							break;
-						case EXTRA_SETTINGS_MENU_NO_ACTION:
-							break;
-						case EXTRA_SETTINGS_MENU_QUIT_APPLICATION:
-							this->set_close(0);
-							this->setup_no_menu();
-							done = true;
-							break;
-						case EXTRA_SETTINGS_MENU_FULLSCREEN:
-							this->fullscreen_change();
-							done = true;
-							break;
-						case EXTRA_SETTINGS_MENU_SPLIT:
-							this->split_change();
-							done = true;
-							break;
-						default:
-							break;
-					}
-					this->extra_menu->reset_output_option();
-					continue;
+				switch(this->extra_menu->selected_index) {
+					case EXTRA_SETTINGS_MENU_BACK:
+						this->setup_main_menu(false);
+						done = true;
+						break;
+					case EXTRA_SETTINGS_MENU_NO_ACTION:
+						break;
+					case EXTRA_SETTINGS_MENU_RESET_SETTINGS:
+						this->m_prepare_load = SIMPLE_RESET_DATA_INDEX;
+						this->setup_no_menu();
+						done = true;
+						break;
+					case EXTRA_SETTINGS_MENU_QUIT_APPLICATION:
+						this->set_close(0);
+						this->setup_no_menu();
+						done = true;
+						break;
+					case EXTRA_SETTINGS_MENU_FULLSCREEN:
+						this->fullscreen_change();
+						done = true;
+						break;
+					case EXTRA_SETTINGS_MENU_SPLIT:
+						this->split_change();
+						done = true;
+						break;
+					case EXTRA_SETTINGS_MENU_USB_CONFLICT_RESOLUTION:
+						this->setup_usb_conflict_resolution_menu();
+						done = true;
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case SHORTCUTS_MENU_TYPE:
-				if(this->shortcut_menu->poll(event_data)) {
-					switch(this->shortcut_menu->selected_index) {
-						case SHORTCUT_MENU_BACK:
-							this->setup_input_menu(false);
-							done = true;
-							break;
-						case SHORTCUT_MENU_NO_ACTION:
-							break;
-						default:
-							this->chosen_button = this->shortcut_menu->selected_index;
-							this->setup_action_selection_menu();
-							done = true;
-							break;
-					}
-					this->shortcut_menu->reset_output_option();
-					continue;
+				switch(this->shortcut_menu->selected_index) {
+					case SHORTCUT_MENU_BACK:
+						this->setup_input_menu(false);
+						done = true;
+						break;
+					case SHORTCUT_MENU_NO_ACTION:
+						break;
+					default:
+						this->chosen_button = this->shortcut_menu->selected_index;
+						this->setup_action_selection_menu();
+						done = true;
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case ACTION_SELECTION_MENU_TYPE:
-				if(this->action_selection_menu->poll(event_data)) {
-					switch(this->action_selection_menu->selected_index) {
-						case ACTION_SELECTION_MENU_BACK:
-							this->setup_shortcuts_menu(false);
-							done = true;
-							break;
-						case ACTION_SELECTION_MENU_NO_ACTION:
-							break;
-						default:
-							(*this->possible_buttons_ptrs[this->chosen_button]) = this->possible_actions[this->action_selection_menu->selected_index];
-							break;
-					}
-					this->action_selection_menu->reset_output_option();
-					continue;
+				switch(this->action_selection_menu->selected_index) {
+					case ACTION_SELECTION_MENU_BACK:
+						this->setup_shortcuts_menu(false);
+						done = true;
+						break;
+					case ACTION_SELECTION_MENU_NO_ACTION:
+						break;
+					default:
+						(*this->possible_buttons_ptrs[this->chosen_button]) = this->possible_actions[this->action_selection_menu->selected_index];
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case STATUS_MENU_TYPE:
-				if(this->status_menu->poll(event_data)) {
-					switch(this->status_menu->selected_index) {
-						case STATUS_MENU_BACK:
-							this->setup_main_menu(false);
-							done = true;
-							break;
-						case STATUS_MENU_NO_ACTION:
-							break;
-						default:
-							break;
-					}
-					this->status_menu->reset_output_option();
-					continue;
+				switch(this->status_menu->selected_index) {
+					case STATUS_MENU_BACK:
+						this->setup_main_menu(false);
+						done = true;
+						break;
+					case STATUS_MENU_NO_ACTION:
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case LICENSES_MENU_TYPE:
-				if(this->license_menu->poll(event_data)) {
-					switch(this->license_menu->selected_index) {
-						case LICENSE_MENU_BACK:
-							this->setup_main_menu(false);
-							done = true;
-							break;
-						case LICENSE_MENU_NO_ACTION:
-							break;
-						default:
-							break;
-					}
-					this->license_menu->reset_output_option();
-					continue;
+				switch(this->license_menu->selected_index) {
+					case LICENSE_MENU_BACK:
+						this->setup_main_menu(false);
+						done = true;
+						break;
+					case LICENSE_MENU_NO_ACTION:
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case SCALING_RATIO_MENU_TYPE:
-				if(this->scaling_ratio_menu->poll(event_data)) {
-					switch(this->scaling_ratio_menu->selected_index) {
-						case SCALING_RATIO_MENU_BACK:
-							this->setup_video_menu(false);
-							done = true;
-							break;
-						case SCALING_RATIO_MENU_NO_ACTION:
-							break;
-						case SCALING_RATIO_MENU_FULLSCREEN_SCALING_TOP:
-							this->ratio_change(true);
-							break;
-						case SCALING_RATIO_MENU_FULLSCREEN_SCALING_BOTTOM:
-							this->ratio_change(false);
-							break;
-						case SCALING_RATIO_MENU_NON_INT_SCALING_TOP:
-							this->non_int_scaling_change(true);
-							break;
-						case SCALING_RATIO_MENU_NON_INT_SCALING_BOTTOM:
-							this->non_int_scaling_change(false);
-							break;
-						case SCALING_RATIO_MENU_ALGO_DEC:
-							this->non_int_mode_change(false);
-							break;
-						case SCALING_RATIO_MENU_ALGO_INC:
-							this->non_int_mode_change(true);
-							break;
-						default:
-							break;
-					}
-					this->scaling_ratio_menu->reset_output_option();
-					continue;
+				switch(this->scaling_ratio_menu->selected_index) {
+					case SCALING_RATIO_MENU_BACK:
+						this->setup_video_menu(false);
+						done = true;
+						break;
+					case SCALING_RATIO_MENU_NO_ACTION:
+						break;
+					case SCALING_RATIO_MENU_FULLSCREEN_SCALING_TOP:
+						this->ratio_change(true);
+						break;
+					case SCALING_RATIO_MENU_FULLSCREEN_SCALING_BOTTOM:
+						this->ratio_change(false);
+						break;
+					case SCALING_RATIO_MENU_NON_INT_SCALING_TOP:
+						this->non_int_scaling_change(true);
+						break;
+					case SCALING_RATIO_MENU_NON_INT_SCALING_BOTTOM:
+						this->non_int_scaling_change(false);
+						break;
+					case SCALING_RATIO_MENU_ALGO_DEC:
+						this->non_int_mode_change(false);
+						break;
+					case SCALING_RATIO_MENU_ALGO_INC:
+						this->non_int_mode_change(true);
+						break;
+					case SCALING_RATIO_MENU_FORCE_SAME_SCALING:
+						this->force_same_scaling_change();
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case ISN_MENU_TYPE:
-				if(this->is_nitro_menu->poll(event_data)) {
-					switch(this->is_nitro_menu->selected_index) {
-						case ISN_MENU_BACK:
-							this->setup_main_menu(false);
-							done = true;
-							break;
-						case ISN_MENU_NO_ACTION:
-							break;
-						case ISN_MENU_DELAY:
-							break;
-						case ISN_MENU_TYPE_DEC:
-							this->is_nitro_capture_type_change(false);
-							break;
-						case ISN_MENU_TYPE_INC:
-							this->is_nitro_capture_type_change(true);
-							break;
-						case ISN_MENU_SPEED_DEC:
-							this->is_nitro_capture_speed_change(false);
-							break;
-						case ISN_MENU_SPEED_INC:
-							this->is_nitro_capture_speed_change(true);
-							break;
-						case ISN_MENU_RESET:
-							this->is_nitro_capture_reset_hw();
-							break;
-						default:
-							break;
-					}
-					this->is_nitro_menu->reset_output_option();
-					continue;
+				switch(this->is_nitro_menu->selected_index) {
+					case ISN_MENU_BACK:
+						this->setup_main_menu(false);
+						done = true;
+						break;
+					case ISN_MENU_NO_ACTION:
+						break;
+					case ISN_MENU_DELAY:
+						break;
+					case ISN_MENU_TYPE_DEC:
+						this->is_nitro_capture_type_change(false);
+						break;
+					case ISN_MENU_TYPE_INC:
+						this->is_nitro_capture_type_change(true);
+						break;
+					case ISN_MENU_SPEED_DEC:
+						this->is_nitro_capture_speed_change(false);
+						break;
+					case ISN_MENU_SPEED_INC:
+						this->is_nitro_capture_speed_change(true);
+						break;
+					case ISN_MENU_RESET:
+						this->is_nitro_capture_reset_hw();
+						break;
+					case ISN_MENU_BATTERY_DEC:
+						this->is_nitro_battery_change(false);
+						break;
+					case ISN_MENU_BATTERY_INC:
+						this->is_nitro_battery_change(true);
+						break;
+					case ISN_MENU_AC_ADAPTER_TOGGLE:
+						this->is_nitro_ac_adapter_change();
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
+				break;
+			case PARTNER_CTR_MENU_TYPE:
+				switch(this->partner_ctr_menu->selected_index) {
+					case PCTR_MENU_BACK:
+						this->setup_main_menu(false);
+						done = true;
+						break;
+					case PCTR_MENU_NO_ACTION:
+						break;
+					case PCTR_MENU_RESET:
+						this->is_nitro_capture_reset_hw();
+						break;
+					case PCTR_MENU_BATTERY_DEC:
+						this->partner_ctr_battery_change(false);
+						break;
+					case PCTR_MENU_BATTERY_INC:
+						this->partner_ctr_battery_change(true);
+						break;
+					case PCTR_MENU_AC_ADAPTER_CONNECTED_TOGGLE:
+						this->partner_ctr_ac_adapter_connected_change();
+						break;
+					case PCTR_MENU_AC_ADAPTER_CHARGING_TOGGLE:
+						this->partner_ctr_ac_adapter_charging_change();
+						break;
+					default:
+						break;
+				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case VIDEO_EFFECTS_MENU_TYPE:
-				if(this->video_effects_menu->poll(event_data)) {
-					switch(this->video_effects_menu->selected_index) {
-						case VIDEO_EFFECTS_MENU_BACK:
-							this->setup_video_menu(false);
-							done = true;
-							break;
-						case VIDEO_EFFECTS_MENU_NO_ACTION:
-							break;
-						case VIDEO_EFFECTS_MENU_INPUT_COLORSPACE_INC:
-							this->input_colorspace_mode_change(true);
-							break;
-						case VIDEO_EFFECTS_MENU_INPUT_COLORSPACE_DEC:
-							this->input_colorspace_mode_change(false);
-							break;
-						case VIDEO_EFFECTS_MENU_FRAME_BLENDING_INC:
-							this->frame_blending_mode_change(true);
-							break;
-						case VIDEO_EFFECTS_MENU_FRAME_BLENDING_DEC:
-							this->frame_blending_mode_change(false);
-							break;
-						default:
-							break;
-					}
-					this->video_effects_menu->reset_output_option();
-					continue;
+				switch(this->video_effects_menu->selected_index) {
+					case VIDEO_EFFECTS_MENU_BACK:
+						this->setup_video_menu(false);
+						done = true;
+						break;
+					case VIDEO_EFFECTS_MENU_NO_ACTION:
+						break;
+					case VIDEO_EFFECTS_MENU_INPUT_COLORSPACE_INC:
+						this->input_colorspace_mode_change(true);
+						break;
+					case VIDEO_EFFECTS_MENU_INPUT_COLORSPACE_DEC:
+						this->input_colorspace_mode_change(false);
+						break;
+					case VIDEO_EFFECTS_MENU_FRAME_BLENDING_INC:
+						this->frame_blending_mode_change(true);
+						break;
+					case VIDEO_EFFECTS_MENU_FRAME_BLENDING_DEC:
+						this->frame_blending_mode_change(false);
+						break;
+					case VIDEO_EFFECTS_MENU_COLOR_CORRECTION_MENU:
+						this->setup_color_correction_menu();
+						done = true;
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			case INPUT_MENU_TYPE:
-				if(this->input_menu->poll(event_data)) {
-					switch(this->input_menu->selected_index) {
-						case INPUT_MENU_BACK:
-							this->setup_main_menu(false);
-							done = true;
-							break;
-						case INPUT_MENU_NO_ACTION:
-							break;
-						case INPUT_MENU_SHORTCUT_SETTINGS:
-							this->setup_shortcuts_menu();
-							done = true;
-							break;
-						case INPUT_MENU_TOGGLE_BUTTONS:
-							this->input_toggle_change(this->shared_data->input_data.enable_buttons_input);
-							break;
-						case INPUT_MENU_TOGGLE_JOYSTICK:
-							this->input_toggle_change(this->shared_data->input_data.enable_controller_input);
-							break;
-						case INPUT_MENU_TOGGLE_KEYBOARD:
-							this->input_toggle_change(this->shared_data->input_data.enable_keyboard_input);
-							break;
-						case INPUT_MENU_TOGGLE_MOUSE:
-							this->input_toggle_change(this->shared_data->input_data.enable_mouse_input);
-							break;
-						case INPUT_MENU_TOGGLE_FAST_POLL:
-							this->fast_poll_change();
-							break;
-						default:
-							break;
-					}
-					this->input_menu->reset_output_option();
-					continue;
+				switch(this->input_menu->selected_index) {
+					case INPUT_MENU_BACK:
+						this->setup_main_menu(false);
+						done = true;
+						break;
+					case INPUT_MENU_NO_ACTION:
+						break;
+					case INPUT_MENU_SHORTCUT_SETTINGS:
+						this->setup_shortcuts_menu();
+						done = true;
+						break;
+					case INPUT_MENU_TOGGLE_BUTTONS:
+						this->input_toggle_change(this->shared_data->input_data.enable_buttons_input);
+						break;
+					case INPUT_MENU_TOGGLE_JOYSTICK:
+						this->input_toggle_change(this->shared_data->input_data.enable_controller_input);
+						break;
+					case INPUT_MENU_TOGGLE_KEYBOARD:
+						this->input_toggle_change(this->shared_data->input_data.enable_keyboard_input);
+						break;
+					case INPUT_MENU_TOGGLE_MOUSE:
+						this->input_toggle_change(this->shared_data->input_data.enable_mouse_input);
+						break;
+					case INPUT_MENU_TOGGLE_FAST_POLL:
+						this->fast_poll_change();
+						break;
+					default:
+						break;
 				}
+				this->loaded_menu_ptr->reset_output_option();
+				break;
+			case AUDIO_DEVICE_MENU_TYPE:
+				switch(this->audio_device_menu->selected_index) {
+					case AUDIODEVICE_MENU_BACK:
+						this->setup_audio_menu(false);
+						done = true;
+						break;
+					case AUDIODEVICE_MENU_NO_ACTION:
+						break;
+					default:
+						audio_output_device_data tmp_out_device;
+						int output_device_index = this->audio_device_menu->selected_index - 1;
+						if((output_device_index >= 0) && (output_device_index < ((int)this->possible_audio_devices.size()))) {
+							tmp_out_device.preference_requested = true;
+							tmp_out_device.preferred = this->possible_audio_devices[output_device_index];
+						}
+						this->audio_device_change(tmp_out_device);
+						break;
+				}
+				this->loaded_menu_ptr->reset_output_option();
+				break;
+			case SEPARATOR_MENU_TYPE:
+				switch(this->separator_menu->selected_index) {
+					case SEPARATOR_MENU_BACK:
+						this->setup_video_menu(false);
+						done = true;
+						break;
+					case SEPARATOR_MENU_NO_ACTION:
+						break;
+					case SEPARATOR_MENU_SIZE_DEC_1:
+						this->separator_size_change(-1);
+						break;
+					case SEPARATOR_MENU_SIZE_INC_1:
+						this->separator_size_change(1);
+						break;
+					case SEPARATOR_MENU_SIZE_DEC_10:
+						this->separator_size_change(-10);
+						break;
+					case SEPARATOR_MENU_SIZE_INC_10:
+						this->separator_size_change(10);
+						break;
+					case SEPARATOR_MENU_WINDOW_MUL_DEC:
+						this->separator_windowed_multiplier_change(false);
+						break;
+					case SEPARATOR_MENU_WINDOW_MUL_INC:
+						this->separator_windowed_multiplier_change(true);
+						break;
+					case SEPARATOR_MENU_FULLSCREEN_MUL_DEC:
+						this->separator_fullscreen_multiplier_change(false);
+						break;
+					case SEPARATOR_MENU_FULLSCREEN_MUL_INC:
+						this->separator_fullscreen_multiplier_change(true);
+						break;
+					default:
+						break;
+				}
+				this->loaded_menu_ptr->reset_output_option();
+				break;
+			case COLOR_CORRECTION_MENU_TYPE:
+				switch(this->color_correction_menu->selected_index) {
+					case COLORCORRECTION_MENU_BACK:
+						this->setup_video_effects_menu(false);
+						done = true;
+						break;
+					case COLORCORRECTION_MENU_NO_ACTION:
+						break;
+					default:
+						this->color_correction_value_change(this->color_correction_menu->selected_index);
+						break;
+				}
+				this->loaded_menu_ptr->reset_output_option();
+				break;
+			case MAIN_3D_MENU_TYPE:
+				switch(this->main_3d_menu->selected_index) {
+					case MAIN_3D_MENU_BACK:
+						this->setup_video_menu(false);
+						done = true;
+						break;
+					case MAIN_3D_MENU_NO_ACTION:
+						break;
+					case MAIN_3D_MENU_REQUEST_3D_TOGGLE:
+						this->request_3d_change();
+						break;
+					case MAIN_3D_MENU_INTERLEAVED_TOGGLE:
+						this->interleaved_3d_change();
+						break;
+					case MAIN_3D_MENU_SQUISH_TOP_TOGGLE:
+						this->squish_3d_change(true);
+						break;
+					case MAIN_3D_MENU_SQUISH_BOTTOM_TOGGLE:
+						this->squish_3d_change(false);
+						break;
+					case MAIN_3D_MENU_SECOND_SCREEN_POSITION_SETTINGS:
+						this->setup_second_screen_3d_relpos_menu();
+						done = true;
+						break;
+					default:
+						break;
+				}
+				this->loaded_menu_ptr->reset_output_option();
+				break;
+			case SECOND_SCREEN_RELATIVE_POS_MENU_TYPE:
+				switch(this->second_screen_3d_relpos_menu->selected_index) {
+					case SECOND_SCREEN_3D_REL_POS_MENU_BACK:
+						this->setup_main_3d_menu(false);
+						done = true;
+						break;
+					case SECOND_SCREEN_3D_REL_POS_MENU_NO_ACTION:
+						break;
+					case SECOND_SCREEN_3D_REL_POS_MENU_CONFIRM:
+						this->second_screen_3d_pos_change(this->second_screen_3d_relpos_menu->selected_confirm_value);
+						break;
+					case SECOND_SCREEN_3D_REL_POS_MENU_TOGGLE_MATCH:
+						this->second_screen_3d_match_bottom_pos_change();
+						break;
+					default:
+						break;
+				}
+				this->loaded_menu_ptr->reset_output_option();
+				break;
+			case USB_CONFLICT_RESOLUTION_MENU_TYPE:
+				switch(this->usb_conflict_resolution_menu->selected_index) {
+					case USBCONRESO_MENU_BACK:
+						this->setup_extra_menu(false);
+						done = true;
+						break;
+					case USBCONRESO_MENU_NO_ACTION:
+						break;
+					case USBCONRESO_MENU_NISE_DS:
+						this->devices_allowed_change(CC_NISETRO_DS);
+						break;
+					case USBCONRESO_MENU_OPTI_O3DS:
+						this->devices_allowed_change(CC_OPTIMIZE_O3DS);
+						break;
+					default:
+						break;
+				}
+				this->loaded_menu_ptr->reset_output_option();
+				break;
+			case OPTIMIZE_3DS_MENU_TYPE:
+				switch(this->optimize_3ds_menu->selected_index) {
+					case OPTIMIZE3DS_MENU_BACK:
+						this->setup_main_menu(false);
+						done = true;
+						break;
+					case OPTIMIZE3DS_MENU_NO_ACTION:
+						break;
+					case OPTIMIZE3DS_MENU_INFO_DEVICE_ID:
+						break;
+					case OPTIMIZE3DS_MENU_COPY_DEVICE_ID:
+						sf::Clipboard::setString(get_device_id_string(this->capture_status));
+						this->print_notification("Device ID copied!");
+						break;
+					case OPTIMIZE3DS_MENU_OPTIMIZE_SERIAL_KEY:
+						break;
+					case OPTIMIZE3DS_MENU_OPTIMIZE_SERIAL_KEY_MENU:
+						this->setup_optimize_serial_key_add_menu();
+						break;
+					case OPTIMIZE3DS_MENU_INPUT_VIDEO_FORMAT_INC:
+						this->input_video_data_format_request_change(true);
+						break;
+					case OPTIMIZE3DS_MENU_INPUT_VIDEO_FORMAT_DEC:
+						this->input_video_data_format_request_change(false);
+						break;
+					default:
+						break;
+				}
+				this->loaded_menu_ptr->reset_output_option();
+				break;
+			case OPTIMIZE_SERIAL_KEY_ADD_MENU_TYPE:
+				switch(this->optimize_serial_key_add_menu->selected_index) {
+					case OPTIMIZE_SERIAL_KEY_ADD_MENU_BACK:
+						this->setup_optimize_3ds_menu(false);
+						done = true;
+						break;
+					case OPTIMIZE_SERIAL_KEY_ADD_MENU_NO_ACTION:
+						break;
+					case OPTIMIZE_SERIAL_KEY_ADD_MENU_CONFIRM:
+						if(add_new_cc_key(this->optimize_serial_key_add_menu->get_key(), CAPTURE_CONN_CYPRESS_OPTIMIZE, this->optimize_serial_key_add_menu->key_for_new)) {
+							check_device_serial_key_update(this->capture_status, this->optimize_serial_key_add_menu->key_for_new, this->optimize_serial_key_add_menu->get_key());
+							this->setup_optimize_3ds_menu(false);
+							done = true;
+						}
+						break;
+					case OPTIMIZE_SERIAL_KEY_ADD_MENU_TARGET_DEC:
+						this->optimize_serial_key_add_menu->key_for_new = !this->optimize_serial_key_add_menu->key_for_new;
+						break;
+					case OPTIMIZE_SERIAL_KEY_ADD_MENU_TARGET_INC:
+						this->optimize_serial_key_add_menu->key_for_new = !this->optimize_serial_key_add_menu->key_for_new;
+						break;
+					case OPTIMIZE_SERIAL_KEY_ADD_MENU_TARGET_INFO:
+						break;
+					case OPTIMIZE_SERIAL_KEY_ADD_MENU_SELECT_TEXTBOX:
+						break;
+					case OPTIMIZE_SERIAL_KEY_ADD_MENU_KEY_PRINT:
+						break;
+					default:
+						break;
+				}
+				this->loaded_menu_ptr->reset_output_option();
 				break;
 			default:
 				break;
 		}
 	}
-}
-
-void WindowScreen::setup_connection_menu(std::vector<CaptureDevice> *devices_list, bool reset_data) {
-	// Skip the check here. It's special.
-	this->curr_menu = CONNECT_MENU_TYPE;
-	if(reset_data)
-		this->connection_menu->reset_data();
-	this->connection_menu->insert_data(devices_list);
 }
 
 int WindowScreen::check_connection_menu_result() {
@@ -1984,10 +2492,17 @@ void WindowScreen::end_connection_menu() {
 	this->setup_no_menu();
 }
 
+void WindowScreen::end_reconnection_menu() {
+	this->setup_no_menu();
+}
+
 void WindowScreen::update_ds_3ds_connection(bool changed_type) {
 	if(changed_type && (this->curr_menu == CROP_MENU_TYPE))
 		this->setup_no_menu();
-	this->prepare_size_ratios(false, false);
+	if(changed_type)
+		this->prepare_size_ratios(false, false);
+	else
+		this->prepare_size_ratios(true, true);
 	this->future_operations.call_crop = true;
 }
 
@@ -1997,6 +2512,12 @@ void WindowScreen::update_capture_specific_settings() {
 		this->setup_main_menu(true, true);
 	}
 	if(this->curr_menu == ISN_MENU_TYPE)
+		this->setup_no_menu();
+	if(this->curr_menu == PARTNER_CTR_MENU_TYPE)
+		this->setup_no_menu();
+	if(this->curr_menu == OPTIMIZE_3DS_MENU_TYPE)
+		this->setup_no_menu();
+	if(this->curr_menu == OPTIMIZE_SERIAL_KEY_ADD_MENU_TYPE)
 		this->setup_no_menu();
 }
 
@@ -2083,11 +2604,11 @@ void WindowScreen::poll_window(bool do_everything) {
 					events_queue.emplace(EVENT_CLOSED);
 				else if(const auto* keyPressed = event->getIf<sf::Event::KeyPressed>()) {
 					if(this->shared_data->input_data.enable_keyboard_input)
-						events_queue.emplace(true, keyPressed->code);
+						events_queue.emplace(true, keyPressed->code, keyPressed->alt, keyPressed->control, keyPressed->shift, keyPressed->system);
 				}
 				else if(const auto* keyReleased = event->getIf<sf::Event::KeyReleased>()) {
 					if(this->shared_data->input_data.enable_keyboard_input)
-						events_queue.emplace(false, keyReleased->code);
+						events_queue.emplace(false, keyReleased->code, keyReleased->alt, keyReleased->control, keyReleased->shift, keyReleased->system);
 				}
 				else if(const auto* textEntered = event->getIf<sf::Event::TextEntered>()) {
 					if(this->shared_data->input_data.enable_keyboard_input)
@@ -2123,7 +2644,7 @@ void WindowScreen::poll_window(bool do_everything) {
 			if(do_everything) {
 				check_held_reset(sf::Mouse::isButtonPressed(sf::Mouse::Button::Right), this->right_click_action);
 				bool found = false;
-				for(int i = 0; i < sf::Joystick::Count; i++) {
+				for(unsigned int i = 0; i < sf::Joystick::Count; i++) {
 					if(!sf::Joystick::isConnected(i))
 						continue;
 					if(sf::Joystick::getButtonCount(i) <= 0)
@@ -2145,7 +2666,11 @@ void WindowScreen::poll_window(bool do_everything) {
 						events_queue.emplace(true, sf::Mouse::Button::Right, touch_pos);
 						this->touch_right_click_action.start_time = std::chrono::high_resolution_clock::now();
 					}
-					events_queue.emplace(true, sf::Mouse::Button::Left, touch_pos);
+					const std::chrono::duration<double> difftouch = curr_time - this->last_touch_left_time;
+					if(difftouch.count() > this->touch_short_press_timer) {
+						events_queue.emplace(true, sf::Mouse::Button::Left, touch_pos);
+						this->last_touch_left_time = std::chrono::high_resolution_clock::now();
+					}
 				}
 				if(this->shared_data->input_data.enable_controller_input)
 					joystick_axis_poll(this->events_queue);
@@ -2165,75 +2690,103 @@ void WindowScreen::poll_window(bool do_everything) {
 }
 
 void WindowScreen::prepare_menu_draws(int view_size_x, int view_size_y) {
+	float menu_scaling_factor = (float)this->loaded_info.menu_scaling_factor;
 	switch(this->loaded_menu) {
 		case CONNECT_MENU_TYPE:
-			this->connection_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y);
+			this->connection_menu->prepare(menu_scaling_factor, view_size_x, view_size_y);
 			break;
 		case MAIN_MENU_TYPE:
-			this->main_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, this->capture_status->connected);
+			this->main_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->capture_status->connected);
 			break;
 		case VIDEO_MENU_TYPE:
-			this->video_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info, this->m_stype);
+			this->video_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info, this->m_stype);
 			break;
 		case CROP_MENU_TYPE:
-			this->crop_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, *this->get_crop_index_ptr(&this->loaded_info));
+			this->crop_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, *this->get_crop_index_ptr(&this->loaded_info));
 			break;
 		case TOP_PAR_MENU_TYPE:
-			this->par_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, this->loaded_info.top_par);
+			this->par_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->loaded_info.top_par);
 			break;
 		case BOTTOM_PAR_MENU_TYPE:
-			this->par_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, this->loaded_info.bot_par);
+			this->par_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->loaded_info.bot_par);
 			break;
 		case ROTATION_MENU_TYPE:
-			this->rotation_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info);
+			this->rotation_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info);
 			break;
 		case OFFSET_MENU_TYPE:
-			this->offset_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info);
+			this->offset_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info);
 			break;
 		case AUDIO_MENU_TYPE:
-			this->audio_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, this->audio_data);
+			this->audio_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->audio_data);
 			break;
 		case BFI_MENU_TYPE:
-			this->bfi_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info);
+			this->bfi_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info);
 			break;
 		case RELATIVE_POS_MENU_TYPE:
-			this->relpos_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, this->loaded_info.bottom_pos);
+			this->relpos_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->loaded_info.bottom_pos);
 			break;
 		case RESOLUTION_MENU_TYPE:
-			this->resolution_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, this->loaded_info.fullscreen_mode_width, this->loaded_info.fullscreen_mode_height);
+			this->resolution_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->loaded_info.fullscreen_mode_width, this->loaded_info.fullscreen_mode_height);
 			break;
 		case SAVE_MENU_TYPE:
-			this->fileconfig_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y);
+			this->fileconfig_menu->prepare(menu_scaling_factor, view_size_x, view_size_y);
 			break;
 		case LOAD_MENU_TYPE:
-			this->fileconfig_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y);
+			this->fileconfig_menu->prepare(menu_scaling_factor, view_size_x, view_size_y);
 			break;
 		case EXTRA_MENU_TYPE:
-			this->extra_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y);
+			this->extra_menu->prepare(menu_scaling_factor, view_size_x, view_size_y);
 			break;
 		case SHORTCUTS_MENU_TYPE:
-			this->shortcut_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y);
+			this->shortcut_menu->prepare(menu_scaling_factor, view_size_x, view_size_y);
 			break;
 		case ACTION_SELECTION_MENU_TYPE:
-			this->action_selection_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, (*this->possible_buttons_ptrs[this->chosen_button])->cmd);
+			this->action_selection_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, (*this->possible_buttons_ptrs[this->chosen_button])->cmd);
 			break;
 		case STATUS_MENU_TYPE:
-			this->status_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, FPSArrayGetAverage(&in_fps), FPSArrayGetAverage(&poll_fps), FPSArrayGetAverage(&draw_fps), this->capture_status);
+			this->status_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, FPSArrayGetAverage(&in_fps), FPSArrayGetAverage(&poll_fps), FPSArrayGetAverage(&draw_fps), this->capture_status);
 			break;
 		case LICENSES_MENU_TYPE:
-			this->license_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y);
+			this->license_menu->prepare(menu_scaling_factor, view_size_x, view_size_y);
 			break;
 		case SCALING_RATIO_MENU_TYPE:
-			this->scaling_ratio_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info);
+			this->scaling_ratio_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info);
 			break;
 		case ISN_MENU_TYPE:
-			this->is_nitro_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, this->capture_status);
+			this->is_nitro_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->capture_status);
+			break;
+		case PARTNER_CTR_MENU_TYPE:
+			this->partner_ctr_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->capture_status);
 			break;
 		case VIDEO_EFFECTS_MENU_TYPE:
-			this->video_effects_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info);
+			this->video_effects_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info);
 			break;
 		case INPUT_MENU_TYPE:
-			this->input_menu->prepare(this->loaded_info.menu_scaling_factor, view_size_x, view_size_y, &this->shared_data->input_data);
+			this->input_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, &this->shared_data->input_data);
+			break;
+		case AUDIO_DEVICE_MENU_TYPE:
+			this->audio_device_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->audio_data->get_audio_output_device_data());
+			break;
+		case SEPARATOR_MENU_TYPE:
+			this->separator_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info);
+			break;
+		case COLOR_CORRECTION_MENU_TYPE:
+			this->color_correction_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->loaded_info.top_color_correction);
+			break;
+		case MAIN_3D_MENU_TYPE:
+			this->main_3d_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info, this->display_data, this->capture_status);
+			break;
+		case SECOND_SCREEN_RELATIVE_POS_MENU_TYPE:
+			this->second_screen_3d_relpos_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, &this->loaded_info);
+			break;
+		case USB_CONFLICT_RESOLUTION_MENU_TYPE:
+			this->usb_conflict_resolution_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->capture_status);
+			break;
+		case OPTIMIZE_3DS_MENU_TYPE:
+			this->optimize_3ds_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->capture_status);
+			break;
+		case OPTIMIZE_SERIAL_KEY_ADD_MENU_TYPE:
+			this->optimize_serial_key_add_menu->prepare(menu_scaling_factor, view_size_x, view_size_y);
 			break;
 		default:
 			break;
@@ -2241,77 +2794,7 @@ void WindowScreen::prepare_menu_draws(int view_size_x, int view_size_y) {
 }
 
 void WindowScreen::execute_menu_draws() {
-	switch(this->loaded_menu) {
-		case CONNECT_MENU_TYPE:
-			this->connection_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case MAIN_MENU_TYPE:
-			this->main_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case VIDEO_MENU_TYPE:
-			this->video_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case CROP_MENU_TYPE:
-			this->crop_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case TOP_PAR_MENU_TYPE:
-			this->par_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case BOTTOM_PAR_MENU_TYPE:
-			this->par_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case ROTATION_MENU_TYPE:
-			this->rotation_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case OFFSET_MENU_TYPE:
-			this->offset_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case AUDIO_MENU_TYPE:
-			this->audio_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case BFI_MENU_TYPE:
-			this->bfi_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case RELATIVE_POS_MENU_TYPE:
-			this->relpos_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case RESOLUTION_MENU_TYPE:
-			this->resolution_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case SAVE_MENU_TYPE:
-			this->fileconfig_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case LOAD_MENU_TYPE:
-			this->fileconfig_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case EXTRA_MENU_TYPE:
-			this->extra_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case SHORTCUTS_MENU_TYPE:
-			this->shortcut_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case ACTION_SELECTION_MENU_TYPE:
-			this->action_selection_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case STATUS_MENU_TYPE:
-			this->status_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case LICENSES_MENU_TYPE:
-			this->license_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case SCALING_RATIO_MENU_TYPE:
-			this->scaling_ratio_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case ISN_MENU_TYPE:
-			this->is_nitro_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case VIDEO_EFFECTS_MENU_TYPE:
-			this->video_effects_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		case INPUT_MENU_TYPE:
-			this->input_menu->draw(this->loaded_info.menu_scaling_factor, this->m_win);
-			break;
-		default:
-			break;
-	}
+	float menu_scaling_factor = (float)this->loaded_info.menu_scaling_factor;
+	if((this->loaded_menu != DEFAULT_MENU_TYPE) && (this->loaded_menu_ptr != NULL))
+		this->loaded_menu_ptr->draw(menu_scaling_factor, this->m_win);
 }

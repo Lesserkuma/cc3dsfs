@@ -21,7 +21,7 @@ enum InputMenuOutAction{
 
 class InputMenu : public OptionSelectionMenu {
 public:
-	InputMenu(bool font_load_success, sf::Font &text_font);
+	InputMenu(TextRectanglePool* text_pool);
 	~InputMenu();
 	void prepare(float scaling_factor, int view_size_x, int view_size_y, InputData* input_data);
 	void insert_data(bool enabled_shortcuts, bool enabled_extra_buttons);
@@ -29,11 +29,11 @@ public:
 	void reset_output_option();
 protected:
 	void set_output_option(int index, int action);
-	int get_num_options();
+	size_t get_num_options();
 	std::string get_string_option(int index, int action);
 	void class_setup();
 private:
 	int *options_indexes;
-	int num_enabled_options;
+	size_t num_enabled_options;
 };
 #endif

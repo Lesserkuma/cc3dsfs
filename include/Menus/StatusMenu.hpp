@@ -16,7 +16,7 @@ enum StatusMenuOutAction{
 
 class StatusMenu : public OptionSelectionMenu {
 public:
-	StatusMenu(bool font_load_success, sf::Font &text_font);
+	StatusMenu(TextRectanglePool* text_pool);
 	~StatusMenu();
 	void prepare(float scaling_factor, int view_size_x, int view_size_y, double in_fps, double poll_fps, double draw_fps, CaptureStatus* capture_status);
 	void insert_data();
@@ -26,7 +26,7 @@ protected:
 	bool is_option_inc_dec(int index);
 	bool is_option_selectable(int index, int action);
 	void set_output_option(int index, int action);
-	int get_num_options();
+	size_t get_num_options();
 	std::string get_string_option(int index, int action);
 	void class_setup();
 private:
@@ -34,6 +34,6 @@ private:
 	bool do_update;
 	std::chrono::time_point<std::chrono::high_resolution_clock> last_update_time;
 	int *options_indexes;
-	int num_enabled_options;
+	size_t num_enabled_options;
 };
 #endif

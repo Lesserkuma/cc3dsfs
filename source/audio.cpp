@@ -24,9 +24,8 @@ Audio::Audio(AudioData *audio_data) {
 	this->audio_data = audio_data;
 	// Consume old events
 	this->buffer = new std::int16_t[MAX_SAMPLES_IN * (MAX_MAX_AUDIO_LATENCY + 1)];
+	this->change_sample_rate(SAMPLE_RATE_DS);
 	this->audio_data->check_audio_restart_request();
-	sf::SoundStream::initialize(AUDIO_CHANNELS, SAMPLE_RATE_BASE, {sf::SoundChannel::FrontLeft, sf::SoundChannel::FrontRight});
-	this->setPitch(1.0 / SAMPLE_RATE_DIVISOR);
 	start_audio();
 	setVolume(0);
 	this->final_volume = 0;
@@ -35,11 +34,46 @@ Audio::Audio(AudioData *audio_data) {
 Audio::~Audio() {
 	delete []this->buffer;
 }
+
+AudioSampleRate Audio::get_current_sample_rate() {
+	return this->current_sample_rate;
+}
+
+void Audio::change_sample_rate(AudioSampleRate target) {
+	if(target == this->current_sample_rate)
+		return;
+
+	switch(target) {
+		case SAMPLE_RATE_DS:
+			sf::SoundStream::initialize(AUDIO_CHANNELS, SAMPLE_RATE_DS_BASE, {sf::SoundChannel::FrontLeft, sf::SoundChannel::FrontRight});
+			this->setPitch(1.0 / SAMPLE_RATE_DS_DIVISOR);
+			break;
+		case SAMPLE_RATE_48K:
+			sf::SoundStream::initialize(AUDIO_CHANNELS, 48000, {sf::SoundChannel::FrontLeft, sf::SoundChannel::FrontRight});
+			this->setPitch(1.0);
+			break;
+		case SAMPLE_RATE_44_1K:
+			sf::SoundStream::initialize(AUDIO_CHANNELS, 44100, {sf::SoundChannel::FrontLeft, sf::SoundChannel::FrontRight});
+			this->setPitch(1.0);
+			break;
+		case SAMPLE_RATE_32K:
+			sf::SoundStream::initialize(AUDIO_CHANNELS, 32000, {sf::SoundChannel::FrontLeft, sf::SoundChannel::FrontRight});
+			this->setPitch(1.0);
+			break;
+		case SAMPLE_RATE_32768:
+			sf::SoundStream::initialize(AUDIO_CHANNELS, 32768, {sf::SoundChannel::FrontLeft, sf::SoundChannel::FrontRight});
+			this->setPitch(1.0);
+			break;
+		default:
+			break;
+	}
+	this->current_sample_rate = target;
+}
 	
 void Audio::update_volume() {
 	int new_final_volume = this->audio_data->get_final_volume();
 	if(this->final_volume != new_final_volume)
-		setVolume(new_final_volume);
+		setVolume((float)new_final_volume);
 	this->final_volume = new_final_volume;
 }
 	
@@ -64,6 +98,13 @@ bool Audio::hasTooMuchTimeElapsed() {
 	return (diff.count() > 1.0);
 }
 
+
+bool Audio::hasTooMuchTimeElapsedInside() {
+	auto curr_time = std::chrono::high_resolution_clock::now();
+	const std::chrono::duration<double> diff = curr_time - this->inside_clock_time_start;
+	return (diff.count() > 0.5);
+}
+
 bool Audio::onGetData(sf::SoundStream::Chunk &data) {
 	if(terminate)
 		return false;
@@ -75,16 +116,33 @@ bool Audio::onGetData(sf::SoundStream::Chunk &data) {
 		terminate = true;
 		return false;
 	}
+	inside_clock_time_start = std::chrono::high_resolution_clock::now();
 
 	inside_onGetData = true;
-	int loaded_samples = samples.size();
-	while(loaded_samples <= 0) {
-		samples_wait.lock();
-		if(terminate) {
-			inside_onGetData = false;
-			return false;
+	size_t loaded_samples = samples.size();
+	while(loaded_samples == 0) {
+		switch(this->audio_data->get_audio_mode_output()) {
+			case AUDIO_MODE_STABLE:
+				inside_onGetData = false;
+				return false;
+			case AUDIO_MODE_LOW_LATENCY:
+				samples_wait.timed_lock();
+				if(terminate) {
+					inside_onGetData = false;
+					return false;
+				}
+				loaded_samples = samples.size();
+				if((loaded_samples == 0) && this->hasTooMuchTimeElapsedInside()) {
+					// This is needed by MacOS...
+					// But it also causes some trailing noise when
+					// closing the lid on the devices.
+					inside_onGetData = false;
+					return false;
+				}
+				break;
+			default:
+				break;
 		}
-		loaded_samples = samples.size();
 	}
 	data.samples = (const std::int16_t*)buffer;
 
@@ -95,9 +153,9 @@ bool Audio::onGetData(sf::SoundStream::Chunk &data) {
 
 	data.sampleCount = 0;
 
-	for(int i = 0; i < loaded_samples; i++) {
+	for(size_t i = 0; i < loaded_samples; i++) {
 		const std::int16_t *data_samples = samples.front().bytes;
-		int count = samples.front().size;
+		size_t count = (size_t)samples.front().size;
 		memcpy(buffer + data.sampleCount, data_samples, count * sizeof(std::int16_t));
 		// Unused, but could be useful info
 		//double real_sample_rate = (1.0 / samples.front().time) * count / 2;
@@ -106,7 +164,7 @@ bool Audio::onGetData(sf::SoundStream::Chunk &data) {
 	}
 
 	if(this->audio_data->get_audio_output_type() == AUDIO_OUTPUT_MONO)
-		for(int i = 0; i < data.sampleCount; i++) {
+		for(size_t i = 0; i < data.sampleCount; i++) {
 			int sum = ((int)buffer[i * 2]) + buffer[(i * 2) + 1];
 			// >> is apparently implementation-dependent. Do it like this...
 			int sign_mult = 1;
@@ -122,14 +180,14 @@ bool Audio::onGetData(sf::SoundStream::Chunk &data) {
 
 	#ifdef AUDIO_PANNING_TEST
 	int max_diff = 0;
-	for(int i = 0; i < data.sampleCount; i++) {
+	for(size_t i = 0; i < data.sampleCount; i++) {
 		int diff = abs(buffer[i * 2] - buffer[(i * 2) + 1]);
 		if(diff > max_diff)
 			max_diff = diff;
 	}
 	if(max_diff > greatest_diff)
 		greatest_diff = max_diff;
-	printf("Current diff: %d - Greatest measured diff: %d\n", max_diff, greatest_diff);
+	ActualConsoleOutText("Current diff: " + std::to_string(max_diff) + " - Greatest measured diff: " + std::to_string(greatest_diff));
 	#endif
 
 	// Basically, look into how low the time between calls of the function is

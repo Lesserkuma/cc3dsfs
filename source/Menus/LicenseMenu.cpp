@@ -46,21 +46,6 @@ static const LicenseMenuOptionInfo ftd3xx_license_3_option = {
 static const LicenseMenuOptionInfo ftd3xx_license_4_option = {
 .base_name = "driver-licence-terms-details/"};
 
-static const LicenseMenuOptionInfo libftdi_license_0_option = {
-.base_name = "This software makes use of"};
-
-static const LicenseMenuOptionInfo libftdi_license_1_option = {
-.base_name = "libftdi1."};
-
-static const LicenseMenuOptionInfo libftdi_license_2_option = {
-.base_name = "For its license, check:"};
-
-static const LicenseMenuOptionInfo libftdi_license_3_option = {
-.base_name = "http://developer.intra2net.com/git/?p="};
-
-static const LicenseMenuOptionInfo libftdi_license_4_option = {
-.base_name = "libftdi;a=blob_plain;f=LICENSE;hb=HEAD/"};
-
 static const LicenseMenuOptionInfo libusb_license_0_option = {
 .base_name = "This software makes use of"};
 
@@ -106,6 +91,21 @@ static const LicenseMenuOptionInfo font_license_3_option = {
 static const LicenseMenuOptionInfo font_license_4_option = {
 .base_name = "open-font-license-official-text/"};
 
+static const LicenseMenuOptionInfo font_mono_license_0_option = {
+.base_name = "This software uses the font"};
+
+static const LicenseMenuOptionInfo font_mono_license_1_option = {
+.base_name = "SpaceMono-Regular."};
+
+static const LicenseMenuOptionInfo font_mono_license_2_option = {
+.base_name = "For its license, check:"};
+
+static const LicenseMenuOptionInfo font_mono_license_3_option = {
+.base_name = "openfontlicense.org/"};
+
+static const LicenseMenuOptionInfo font_mono_license_4_option = {
+.base_name = "open-font-license-official-text/"};
+
 static const LicenseMenuOptionInfo isng_license_0_option = {
 .base_name = "Portions of this software are"};
 
@@ -142,21 +142,14 @@ static const LicenseMenuOptionInfo* pollable_options[] = {
 &sfml_license_2_option,
 &sfml_license_3_option,
 &sfml_license_4_option,
-#if defined(USE_FTD3) || defined(USE_FTD2_DRIVER)
+#if defined(USE_FTD3XX) || defined(USE_FTD2_DRIVER)
 &ftd3xx_license_0_option,
 &ftd3xx_license_1_option,
 &ftd3xx_license_2_option,
 &ftd3xx_license_3_option,
 &ftd3xx_license_4_option,
 #endif
-#ifdef USE_FTD2_LIBFTDI
-&libftdi_license_0_option,
-&libftdi_license_1_option,
-&libftdi_license_2_option,
-&libftdi_license_3_option,
-&libftdi_license_4_option,
-#endif
-#if defined(USE_LIBUSB) || defined(USE_FTD3) || defined(USE_FTD2_DRIVER)
+#if defined(USE_LIBUSB) || defined(USE_FTD3XX) || defined(USE_FTD2_DRIVER)
 &libusb_license_0_option,
 &libusb_license_1_option,
 &libusb_license_2_option,
@@ -180,6 +173,11 @@ static const LicenseMenuOptionInfo* pollable_options[] = {
 &font_license_2_option,
 &font_license_3_option,
 &font_license_4_option,
+&font_mono_license_0_option,
+&font_mono_license_1_option,
+&font_mono_license_2_option,
+&font_mono_license_3_option,
+&font_mono_license_4_option,
 &cc3dsfs_license_0_option,
 &cc3dsfs_license_1_option,
 &cc3dsfs_license_2_option,
@@ -187,9 +185,9 @@ static const LicenseMenuOptionInfo* pollable_options[] = {
 &cc3dsfs_license_4_option,
 };
 
-LicenseMenu::LicenseMenu(bool font_load_success, sf::Font &text_font) : OptionSelectionMenu(){
+LicenseMenu::LicenseMenu(TextRectanglePool* text_rectangle_pool) : OptionSelectionMenu(){
 	this->options_indexes = new int[NUM_TOTAL_MENU_OPTIONS];
-	this->initialize(font_load_success, text_font);
+	this->initialize(text_rectangle_pool);
 	this->num_enabled_options = 0;
 }
 
@@ -204,8 +202,8 @@ void LicenseMenu::class_setup() {
 	this->width_divisor_menu = 9;
 	this->base_height_factor_menu = 12;
 	this->base_height_divisor_menu = 6;
-	this->min_text_size = 0.3;
-	this->max_width_slack = 1.1;
+	this->min_text_size = 0.3f;
+	this->max_width_slack = 1.1f;
 	this->menu_color = sf::Color(30, 30, 60, 192);
 	this->title = "Licenses";
 	this->show_back_x = true;
@@ -215,8 +213,8 @@ void LicenseMenu::class_setup() {
 
 void LicenseMenu::insert_data() {
 	this->num_enabled_options = 0;
-	for(int i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
-		this->options_indexes[this->num_enabled_options] = i;
+	for(size_t i = 0; i < NUM_TOTAL_MENU_OPTIONS; i++) {
+		this->options_indexes[this->num_enabled_options] = (int)i;
 		this->num_enabled_options++;
 	}
 	this->prepare_options();
@@ -231,7 +229,7 @@ void LicenseMenu::set_output_option(int index, int action) {
 		this->selected_index = LICENSE_MENU_BACK;
 }
 
-int LicenseMenu::get_num_options() {
+size_t LicenseMenu::get_num_options() {
 	return this->num_enabled_options;
 }
 

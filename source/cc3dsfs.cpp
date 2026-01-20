@@ -6,7 +6,6 @@
 #else
 #include <experimental/filesystem>
 #endif
-#include <iostream>
 #include <fstream>
 #include <sstream>
 #include <cstring>
@@ -27,41 +26,29 @@
 
 #define LOW_POLL_DIVISOR 6
 #define NO_DATA_CONSECUTIVE_THRESHOLD 4
+#define TIME_AUDIO_DEVICE_CHECK 0.25
 
-struct OutTextData {
-	std::string full_text;
-	std::string small_text;
-	bool consumed;
-	TextKind kind;
-};
+#define ANDROID_FIRST_CONNECTION_TIMEOUT 0.5
 
 struct override_all_data {
 	override_win_data override_top_bot_data;
 	override_win_data override_top_data;
 	override_win_data override_bot_data;
+	bool disable_frame_blending = false;
+	bool print_controller_list = false;
 	bool no_audio = false;
 	int volume = DEFAULT_NO_VOLUME_VALUE;
 	bool always_prevent_mouse_showing = false;
 	bool auto_connect_to_first = false;
+	bool auto_close = false;
+	bool force_disable_nisetro_ds = false;
+	bool force_disable_optimize_old_3ds = false;
+	bool auto_save = true;
 	int loaded_profile = STARTUP_FILE_INDEX;
 	bool mono_app = false;
 	bool recovery_mode = false;
 	bool quit_on_first_connection_failure = false;
 };
-
-static void ConsoleOutText(std::string full_text) {
-	if(full_text != "")
-		std::cout << "[" << NAME << "] " << full_text << std::endl;
-}
-
-static void UpdateOutText(OutTextData &out_text_data, std::string full_text, std::string small_text, TextKind kind) {
-	if(!out_text_data.consumed)
-		ConsoleOutText(out_text_data.full_text);
-	out_text_data.full_text = full_text;
-	out_text_data.small_text = small_text;
-	out_text_data.kind = kind;
-	out_text_data.consumed = false;
-}
 
 static void SuccessConnectionOutTextGenerator(OutTextData &out_text_data, CaptureData* capture_data) {
 	if(capture_data->status.connected)
@@ -144,6 +131,7 @@ static bool load_shared(const std::string path, const std::string name, SharedDa
 static bool load(const std::string path, const std::string name, ScreenInfo &top_info, ScreenInfo &bottom_info, ScreenInfo &joint_info, DisplayData &display_data, AudioData *audio_data, OutTextData &out_text_data, CaptureStatus* capture_status) {
 	std::ifstream file(path + name);
 	std::string line;
+	bool loaded_3d_request = false;
 
 	if((!file) || (!file.is_open()) || (!file.good())) {
 		UpdateOutText(out_text_data, "File " + path + name + " load failed.\nDefaults re-loaded.", "Load failed\nDefaults re-loaded", TEXT_KIND_ERROR);
@@ -157,46 +145,111 @@ static bool load(const std::string path, const std::string name, ScreenInfo &top
 			std::istringstream kvp(line);
 			std::string key;
 
-			if(std::getline(kvp, key, '=')) {
-				std::string value;
+			if(!std::getline(kvp, key, '='))
+				continue;
 
-				if(std::getline(kvp, value)) {
+			std::string value;
+			if(!std::getline(kvp, value))
+				continue;
 
-					if(load_screen_info(key, value, "bot_", bottom_info))
-						continue;
-					if(load_screen_info(key, value, "joint_", joint_info))
-						continue;
-					if(load_screen_info(key, value, "top_", top_info))
-						continue;
+			if(load_screen_info(key, value, "bot_", bottom_info))
+				continue;
+			if(load_screen_info(key, value, "joint_", joint_info))
+				continue;
+			if(load_screen_info(key, value, "top_", top_info))
+				continue;
 
-					if(key == "split") {
-						bool split = std::stoi(value);
-						joint_info.window_enabled = !split;
-						top_info.window_enabled = split;
-						bottom_info.window_enabled = split;
-						continue;
-					}
-
-					if(key == "last_connected_ds") {
-						display_data.last_connected_ds = std::stoi(value);
-						continue;
-					}
-
-					if(key == "is_screen_capture_type") {
-						capture_status->capture_type =  static_cast<CaptureScreensType>(std::stoi(value) % CaptureScreensType::CAPTURE_SCREENS_ENUM_END);
-						continue;
-					}
-
-					if(key == "is_speed_capture") {
-						capture_status->capture_speed =  static_cast<CaptureSpeedsType>(std::stoi(value) % CaptureSpeedsType::CAPTURE_SPEEDS_ENUM_END);
-						continue;
-					}
-
-					if(audio_data->load_audio_data(key, value))
-						continue;
-				}
+			if(key == "split") {
+				bool split = std::stoi(value);
+				joint_info.window_enabled = !split;
+				top_info.window_enabled = split;
+				bottom_info.window_enabled = split;
+				continue;
 			}
+
+			if(key == "requested_3d") {
+				set_3d_enabled(capture_status, std::stoi(value));
+				loaded_3d_request = true;
+				continue;
+			}
+
+			if(key == "interleaved_3d") {
+				display_data.interleaved_3d = std::stoi(value);
+				continue;
+			}
+
+			if(key == "request_low_bw_format") {
+				capture_status->request_low_bw_format = std::stoi(value);
+				continue;
+			}
+
+			if(key == "last_connected_ds") {
+				display_data.last_connected_ds = std::stoi(value);
+				continue;
+			}
+
+			if(key == "is_screen_capture_type") {
+				capture_status->capture_type =  static_cast<CaptureScreensType>(std::stoi(value) % CaptureScreensType::CAPTURE_SCREENS_ENUM_END);
+				continue;
+			}
+
+			if(key == "is_speed_capture") {
+				capture_status->capture_speed =  static_cast<CaptureSpeedsType>(std::stoi(value) % CaptureSpeedsType::CAPTURE_SPEEDS_ENUM_END);
+				continue;
+			}
+
+			if(key == "is_battery_percentage") {
+				capture_status->is_battery_percentage =  std::stoi(value);
+				// Even though 1 is allowed, it spam-resets the Hardware...
+				// So don't allow it as the initial value!
+				if(capture_status->is_battery_percentage <= 5)
+					capture_status->is_battery_percentage = 5;
+				if(capture_status->is_battery_percentage > 100)
+					capture_status->is_battery_percentage = 100;
+				continue;
+			}
+
+			if(key == "is_ac_adapter_connected") {
+				capture_status->is_ac_adapter_connected =  std::stoi(value);
+				continue;
+			}
+
+			if(key == "partner_ctr_battery_percentage") {
+				capture_status->partner_ctr_battery_percentage =  std::stoi(value);
+				// Even though 0 is allowed, it turns off the Hardware...
+				// So don't allow it as the initial value!
+				if(capture_status->partner_ctr_battery_percentage <= 1)
+					capture_status->partner_ctr_battery_percentage = 1;
+				if(capture_status->partner_ctr_battery_percentage > 100)
+					capture_status->partner_ctr_battery_percentage = 100;
+				continue;
+			}
+
+			if(key == "partner_ctr_ac_adapter_connected") {
+				capture_status->partner_ctr_ac_adapter_connected =  std::stoi(value);
+				continue;
+			}
+
+			if(key == "partner_ctr_ac_adapter_charging") {
+				capture_status->partner_ctr_ac_adapter_charging =  std::stoi(value);
+				continue;
+			}
+
+			if(key == "optimize_o3ds_scan_for") {
+				capture_status->devices_allowed_scan[CC_OPTIMIZE_O3DS] = std::stoi(value);
+				continue;
+			}
+
+			if(key == "nisetro_ds_scan_for") {
+				capture_status->devices_allowed_scan[CC_NISETRO_DS] = std::stoi(value);
+				continue;
+			}
+
+			if(audio_data->load_audio_data(key, value))
+				continue;
 		}
+		if(!loaded_3d_request)
+			set_3d_enabled(capture_status, false);
 	}
 	catch(...) {
 		UpdateOutText(out_text_data, "File " + path + name + " load failed.\nDefaults re-loaded.", "Load failed\nDefaults re-loaded", TEXT_KIND_ERROR);
@@ -208,9 +261,16 @@ static bool load(const std::string path, const std::string name, ScreenInfo &top
 }
 
 static void defaults_reload(FrontendData *frontend_data, AudioData* audio_data, CaptureStatus* capture_status) {
-	capture_status->enabled_3d = false;
 	capture_status->capture_type = CAPTURE_SCREENS_BOTH;
 	capture_status->capture_speed = CAPTURE_SPEEDS_FULL;
+	capture_status->is_battery_percentage = 100;
+	capture_status->is_ac_adapter_connected = true;
+	capture_status->partner_ctr_battery_percentage = 100;
+	capture_status->partner_ctr_ac_adapter_connected = false;
+	capture_status->partner_ctr_ac_adapter_charging = false;
+	capture_status->request_low_bw_format = true;
+	for(int i = 0; i < CC_POSSIBLE_DEVICES_END; i++)
+		capture_status->devices_allowed_scan[i] = true;
 	reset_screen_info(frontend_data->top_screen->m_info);
 	reset_screen_info(frontend_data->bot_screen->m_info);
 	reset_screen_info(frontend_data->joint_screen->m_info);
@@ -222,13 +282,14 @@ static void defaults_reload(FrontendData *frontend_data, AudioData* audio_data, 
 	frontend_data->reload = true;
 }
 
-static void load_layout_file(int load_index, FrontendData *frontend_data, AudioData* audio_data, OutTextData &out_text_data, CaptureStatus* capture_status, bool skip_io, bool do_print, bool created_proper_folder, bool is_first_load) {
+static void load_layout_file(int load_index, FrontendData *frontend_data, AudioData* audio_data, OutTextData &out_text_data, CaptureStatus* capture_status, bool skip_io, bool do_print, bool is_first_load) {
 	if(skip_io)
 		return;
 
 	defaults_reload(frontend_data, audio_data, capture_status);
 
 	if(load_index == SIMPLE_RESET_DATA_INDEX) {
+		set_3d_enabled(capture_status, false);
 		reset_shared_data(&frontend_data->shared_data);
 		UpdateOutText(out_text_data, "Reset detected. Defaults re-loaded", "Reset detected\nDefaults re-loaded", TEXT_KIND_WARNING);
 		return;
@@ -236,16 +297,18 @@ static void load_layout_file(int load_index, FrontendData *frontend_data, AudioD
 
 	bool name_load_success = false;
 	std::string layout_name = LayoutNameGenerator(load_index);
-	std::string layout_path = LayoutPathGenerator(load_index, created_proper_folder);
-	std::string shared_layout_path = LayoutPathGenerator(STARTUP_FILE_INDEX, created_proper_folder);
+	std::string layout_path = LayoutPathGenerator(load_index);
+	std::string shared_layout_path = get_base_path(false);
 	std::string shared_layout_name = "shared.cfg";
 	bool op_success = load(layout_path, layout_name, frontend_data->top_screen->m_info, frontend_data->bot_screen->m_info, frontend_data->joint_screen->m_info, frontend_data->display_data, audio_data, out_text_data, capture_status);
 	if(do_print && op_success) {
-		std::string load_name = load_layout_name(load_index, created_proper_folder, name_load_success);
+		std::string load_name = load_layout_name(load_index, name_load_success);
 		UpdateOutText(out_text_data, "Layout loaded from: " + layout_path + layout_name, "Layout " + load_name + " loaded", TEXT_KIND_SUCCESS);
 	}
-	else if(!op_success)
+	else if(!op_success) {
 		defaults_reload(frontend_data, audio_data, capture_status);
+		set_3d_enabled(capture_status, false);
+	}
 	sanitize_enabled_info(frontend_data->joint_screen->m_info, frontend_data->top_screen->m_info, frontend_data->bot_screen->m_info);
 	if(!is_first_load)
 		return;
@@ -288,16 +351,26 @@ static bool save(const std::string path, const std::string name, const std::stri
 	file << save_screen_info("bot_", bottom_info);
 	file << save_screen_info("joint_", joint_info);
 	file << save_screen_info("top_", top_info);
+	file << "requested_3d=" << capture_status->requested_3d << std::endl;
+	file << "interleaved_3d=" << display_data.interleaved_3d << std::endl;
+	file << "request_low_bw_format=" << capture_status->request_low_bw_format << std::endl;
 	file << "last_connected_ds=" << display_data.last_connected_ds << std::endl;
 	file << "is_screen_capture_type=" << capture_status->capture_type << std::endl;
 	file << "is_speed_capture=" << capture_status->capture_speed << std::endl;
+	file << "is_battery_percentage=" << capture_status->is_battery_percentage << std::endl;
+	file << "is_ac_adapter_connected=" << capture_status->is_ac_adapter_connected << std::endl;
+	file << "partner_ctr_battery_percentage=" << capture_status->partner_ctr_battery_percentage << std::endl;
+	file << "partner_ctr_ac_adapter_connected=" << capture_status->partner_ctr_ac_adapter_connected << std::endl;
+	file << "partner_ctr_ac_adapter_charging=" << capture_status->partner_ctr_ac_adapter_charging << std::endl;
+	file << "optimize_o3ds_scan_for=" << capture_status->devices_allowed_scan[CC_OPTIMIZE_O3DS] << std::endl;
+	file << "nisetro_ds_scan_for=" << capture_status->devices_allowed_scan[CC_NISETRO_DS] << std::endl;
 	file << audio_data->save_audio_data();
 
 	file.close();
 	return true;
 }
 
-static void save_layout_file(int save_index, FrontendData *frontend_data, AudioData* audio_data, OutTextData &out_text_data, CaptureStatus* capture_status, bool skip_io, bool do_print, bool created_proper_folder) {
+static void save_layout_file(int save_index, FrontendData *frontend_data, AudioData* audio_data, OutTextData &out_text_data, CaptureStatus* capture_status, bool skip_io, bool do_print) {
 	if(skip_io)
 		return;
 
@@ -305,10 +378,10 @@ static void save_layout_file(int save_index, FrontendData *frontend_data, AudioD
 		return;
 
 	bool name_load_success = false;
-	std::string save_name = load_layout_name(save_index, created_proper_folder, name_load_success);
+	std::string save_name = load_layout_name(save_index, name_load_success);
 	std::string layout_name = LayoutNameGenerator(save_index);
-	std::string layout_path = LayoutPathGenerator(save_index, created_proper_folder);
-	std::string shared_layout_path = LayoutPathGenerator(STARTUP_FILE_INDEX, created_proper_folder);
+	std::string layout_path = LayoutPathGenerator(save_index);
+	std::string shared_layout_path = LayoutPathGenerator(STARTUP_FILE_INDEX);
 	std::string shared_layout_name = "shared.cfg";
 	bool op_success = save(layout_path, layout_name, save_name, frontend_data->top_screen->m_info, frontend_data->bot_screen->m_info, frontend_data->joint_screen->m_info, frontend_data->display_data, audio_data, out_text_data, capture_status);
 	if(do_print && op_success) {
@@ -316,6 +389,17 @@ static void save_layout_file(int save_index, FrontendData *frontend_data, AudioD
 	}
 	bool shared_op_success = save_shared(shared_layout_path, shared_layout_name, &frontend_data->shared_data, out_text_data, op_success);
 }
+
+static void touch_file_at_path(const std::string path) {
+	std::ofstream file(path);
+	if(!file.good())
+		return;
+
+	file << NAME << std::endl;
+
+	file.close();
+}
+
 
 static void executeSoundRestart(Audio &audio, AudioData* audio_data, bool do_restart) {
 	if(do_restart) {
@@ -327,31 +411,101 @@ static void executeSoundRestart(Audio &audio, AudioData* audio_data, bool do_res
 	audio.play();
 }
 
-static void soundCall(AudioData *audio_data, CaptureData* capture_data) {
+static bool setDefaultAudioDevice(Audio &audio, std::optional<std::string> &curr_device) {
+	bool success = true;
+	std::string curr_device_default = default_sfml_audio_device_name;
+	if(curr_device != curr_device_default) {
+		audio.stop_audio();
+		audio.stop();
+		success = sf::PlaybackDevice::setDeviceToDefault();
+		curr_device = curr_device_default;
+	}
+	return success;
+}
+
+static void audioDeviceNotificationCallback(bool& requestAudioResearch, bool resetting, sf::PlaybackDevice::Notification notification) {
+	if(resetting)
+		return;
+	switch (notification)
+	{
+		case sf::PlaybackDevice::Notification::DeviceStopped:
+			if(sf::PlaybackDevice::isDefaultDevice())
+				break;
+			requestAudioResearch = true;
+			break;
+		default:
+			break;
+	}
+}
+
+static bool handleAudioDeviceChanges(Audio &audio, AudioData *audio_data, std::optional<std::string> &curr_device, audio_output_device_data &in_use_audio_output_device_data, bool &requestAudioResearch, bool &resetting) {
+	// Code for audio device selection
+	audio_output_device_data old_in_use_audio_output_device_data = in_use_audio_output_device_data;
+	in_use_audio_output_device_data = audio_data->get_audio_output_device_data();
+	int index = -1;
+	bool success = false;
+	bool preference_requested = in_use_audio_output_device_data.preference_requested;
+	bool requestedAudioResearch = requestAudioResearch;
+	requestAudioResearch = false;
+	bool check_audio_device = requestedAudioResearch || ((old_in_use_audio_output_device_data.preference_requested != in_use_audio_output_device_data.preference_requested) || (old_in_use_audio_output_device_data.preferred != in_use_audio_output_device_data.preferred));
+	if(check_audio_device)
+		resetting = true;
+	if(check_audio_device && preference_requested) {
+		std::vector<std::string> audio_devices =  sf::PlaybackDevice::getAvailableDevices();
+		index = searchAudioDevice(in_use_audio_output_device_data.preferred, audio_devices);
+		if((index != -1) && (curr_device != audio_devices[index])) {
+			audio.stop_audio();
+			audio.stop();
+			success = sf::PlaybackDevice::setDevice(audio_devices[index]);
+			curr_device = audio_devices[index];
+		}
+	}
+	if(check_audio_device && ((!preference_requested) || (index == -1)))
+		success = setDefaultAudioDevice(audio, curr_device);
+	resetting = false;
+	return success;
+}
+
+static void soundCall(AudioData *audio_data, CaptureData* capture_data, volatile bool* can_do_output) {
 	std::int16_t (*out_buf)[MAX_SAMPLES_IN] = new std::int16_t[NUM_CONCURRENT_AUDIO_BUFFERS][MAX_SAMPLES_IN];
 	Audio audio(audio_data);
 	int audio_buf_counter = 0;
+	uint16_t last_buffer_index = -1;
 	const bool endianness = is_big_endian();
-	volatile int loaded_samples;
+	volatile size_t loaded_samples;
+	audio_output_device_data in_use_audio_output_device_data;
+	std::optional<std::string> curr_device = sf::PlaybackDevice::getDevice();
+	std::chrono::time_point<std::chrono::high_resolution_clock> last_device_check_time = std::chrono::high_resolution_clock::now();
+	bool requestAudioResearch = false;
+	bool resetting = false;
+	sf::PlaybackDevice::setNotificationCallback([&requestAudioResearch, &resetting](sf::PlaybackDevice::Notification notification){audioDeviceNotificationCallback(requestAudioResearch, resetting, notification);});
 
 	while(capture_data->status.running) {
-		if(capture_data->status.connected && capture_data->status.device.has_audio) {
+		if(capture_data->status.connected && capture_data->status.device.has_audio && (*can_do_output)) {
+			if(audio.get_current_sample_rate() != capture_data->status.device.sample_rate) {
+				audio.stop_audio();
+				audio.stop();
+				audio.change_sample_rate(capture_data->status.device.sample_rate);
+			}
+
 			bool timed_out = !capture_data->status.audio_wait.timed_lock();
 
 			if(!capture_data->status.cooldown_curr_in) {
 				CaptureDataSingleBuffer* data_buffer = capture_data->data_buffers.GetReaderBuffer(CAPTURE_READER_AUDIO);
 				if(data_buffer != NULL) {
 					loaded_samples = audio.samples.size();
-					if((data_buffer->read > get_video_in_size(capture_data)) && (loaded_samples < MAX_MAX_AUDIO_LATENCY)) {
-						uint64_t n_samples = get_audio_n_samples(capture_data, data_buffer->read);
+					if((data_buffer->read >= get_video_in_size(capture_data, data_buffer->is_3d, data_buffer->should_be_3d, data_buffer->buffer_video_data_type)) && (loaded_samples < MAX_MAX_AUDIO_LATENCY) && capture_data->status.connected) {
+						uint64_t n_samples = get_audio_n_samples(capture_data, data_buffer);
 						double out_time = data_buffer->time_in_buf;
-						bool conversion_success = convertAudioToOutput(out_buf[audio_buf_counter], n_samples, endianness, data_buffer, &capture_data->status);
+						bool conversion_success = convertAudioToOutput(out_buf[audio_buf_counter], n_samples, last_buffer_index, endianness, data_buffer, &capture_data->status);
 						if(!conversion_success)
 							audio_data->signal_conversion_error();
-						audio.samples.emplace(out_buf[audio_buf_counter], n_samples, out_time);
-						if(++audio_buf_counter >= NUM_CONCURRENT_AUDIO_BUFFERS)
-							audio_buf_counter = 0;
-						audio.samples_wait.unlock();
+						if(n_samples > 0) {
+							audio.samples.emplace(out_buf[audio_buf_counter], n_samples, out_time);
+							if(++audio_buf_counter >= NUM_CONCURRENT_AUDIO_BUFFERS)
+								audio_buf_counter = 0;
+							audio.samples_wait.unlock();
+						}
 					}
 					capture_data->data_buffers.ReleaseReaderBuffer(CAPTURE_READER_AUDIO);
 				}
@@ -360,26 +514,45 @@ static void soundCall(AudioData *audio_data, CaptureData* capture_data) {
 			loaded_samples = audio.samples.size();
 			if(audio.getStatus() != sf::SoundStream::Status::Playing) {
 				audio.stop_audio();
-				if(loaded_samples > 0) 
-					executeSoundRestart(audio, audio_data, audio.restart);
+				if(loaded_samples > 0) {
+					bool do_restart = audio.restart;
+					executeSoundRestart(audio, audio_data, do_restart);
+					if(do_restart) {
+						in_use_audio_output_device_data.preference_requested = false;
+						curr_device = sf::PlaybackDevice::getDevice();
+						last_device_check_time = std::chrono::high_resolution_clock::now();
+					}
+				}
 			}
 			else {
 				if(loaded_samples > 0) {
 					if(audio.hasTooMuchTimeElapsed()) {
 						audio.stop_audio();
 						executeSoundRestart(audio, audio_data, true);
+						in_use_audio_output_device_data.preference_requested = false;
+						curr_device = sf::PlaybackDevice::getDevice();
+						last_device_check_time = std::chrono::high_resolution_clock::now();
 					}
 				}
 				audio.update_volume();
 			}
 		}
 		else {
+			last_buffer_index = -1;
 			audio.stop_audio();
 			audio.stop();
 			default_sleep();
 		}
+
+		auto curr_time = std::chrono::high_resolution_clock::now();
+		const std::chrono::duration<double> diff = curr_time - last_device_check_time;
+		if(diff.count() >= TIME_AUDIO_DEVICE_CHECK) {
+			last_device_check_time = curr_time;
+			handleAudioDeviceChanges(audio, audio_data, curr_device, in_use_audio_output_device_data, requestAudioResearch, resetting);
+		}
 	}
 
+	sf::PlaybackDevice::setNotificationCallback([](sf::PlaybackDevice::Notification notification){});
 	audio.stop_audio();
 	audio.stop();
 	delete []out_buf;
@@ -404,6 +577,8 @@ static void check_close_application(WindowScreen *screen, CaptureData* capture_d
 static float get_time_multiplier(CaptureData* capture_data, bool should_ignore_data_rate) {
 	if(should_ignore_data_rate)
 		return 1.0;
+	if((capture_data->status.device.cc_type == CAPTURE_CONN_PARTNER_CTR) && get_3d_enabled(&capture_data->status))
+		return 2.0;
 	if(capture_data->status.device.cc_type != CAPTURE_CONN_IS_NITRO)
 		return 1.0;
 	switch(capture_data->status.capture_speed) {
@@ -418,10 +593,36 @@ static float get_time_multiplier(CaptureData* capture_data, bool should_ignore_d
 	}
 }
 
-static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data, bool created_proper_folder, override_all_data &override_data) {
+static void populate_force_disable_ccs(bool* force_cc_disables, override_all_data &override_data) {
+	for(size_t i = 0; i < CC_POSSIBLE_DEVICES_END; i++)
+		force_cc_disables[i] = false;
+	force_cc_disables[CC_NISETRO_DS] = override_data.force_disable_nisetro_ds;
+	force_cc_disables[CC_OPTIMIZE_O3DS] = override_data.force_disable_optimize_old_3ds;
+}
+
+static void check_for_first_connection(bool &did_first_connection, std::chrono::time_point<std::chrono::high_resolution_clock> &start_time, CaptureData* capture_data, FrontendData *frontend_data, bool* force_cc_disables, override_all_data &override_data, OutTextData &out_text_data, int &ret_val) {
+	if(did_first_connection)
+		return;
+
+	#ifdef ANDROID_COMPILATION
+	auto curr_time = std::chrono::high_resolution_clock::now();
+	const std::chrono::duration<double> diff = curr_time - start_time;
+	if(diff.count() < ANDROID_FIRST_CONNECTION_TIMEOUT)
+		return;
+	#endif
+
+	capture_data->status.connected = connect(true, capture_data, frontend_data, force_cc_disables, override_data.auto_connect_to_first);
+	if((override_data.quit_on_first_connection_failure || override_data.auto_close) && (!capture_data->status.connected)) {
+		capture_data->status.running = false;
+		ret_val = -3;
+	}
+	SuccessConnectionOutTextGenerator(out_text_data, capture_data);
+	did_first_connection = true;
+}
+
+static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data, override_all_data &override_data, volatile bool* can_do_output) {
 	VideoOutputData *out_buf;
 	double last_frame_time = 0.0;
-	int num_elements_fps_array = 0;
 	FrontendData frontend_data;
 	ConsumerMutex draw_lock;
 	reset_display_data(&frontend_data.display_data);
@@ -430,26 +631,30 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 	frontend_data.display_data.force_disable_mouse = override_data.always_prevent_mouse_showing;
 	frontend_data.reload = true;
 	bool skip_io = false;
-	int num_allowed_blanks = MAX_ALLOWED_BLANKS;
+	bool did_first_connection = false;
+	const double max_time_no_frames_allowed = MAX_ALLOWED_NO_FRAME_TIME;
+	std::chrono::time_point<std::chrono::high_resolution_clock> start_time = std::chrono::high_resolution_clock::now();
+	std::chrono::time_point<std::chrono::high_resolution_clock> last_valid_frame_time = start_time;
 	OutTextData out_text_data;
-	out_text_data.consumed = true;
 	int ret_val = 0;
 	int poll_timeout = 0;
 	const bool endianness = is_big_endian();
+	bool force_cc_disables[CC_POSSIBLE_DEVICES_END];
 
+	populate_force_disable_ccs(force_cc_disables, override_data);
 	out_buf = new VideoOutputData;
 	memset(out_buf, 0, sizeof(VideoOutputData));
 
 	draw_lock.unlock();
-	WindowScreen *top_screen = new WindowScreen(ScreenType::TOP, &capture_data->status, &frontend_data.display_data, &frontend_data.shared_data, audio_data, &draw_lock, created_proper_folder);
-	WindowScreen *bot_screen = new WindowScreen(ScreenType::BOTTOM, &capture_data->status, &frontend_data.display_data, &frontend_data.shared_data, audio_data, &draw_lock, created_proper_folder);
-	WindowScreen *joint_screen = new WindowScreen(ScreenType::JOINT, &capture_data->status, &frontend_data.display_data, &frontend_data.shared_data, audio_data, &draw_lock, created_proper_folder);
+	WindowScreen *top_screen = new WindowScreen(ScreenType::TOP, &capture_data->status, &frontend_data.display_data, &frontend_data.shared_data, audio_data, &draw_lock, override_data.disable_frame_blending);
+	WindowScreen *bot_screen = new WindowScreen(ScreenType::BOTTOM, &capture_data->status, &frontend_data.display_data, &frontend_data.shared_data, audio_data, &draw_lock, override_data.disable_frame_blending);
+	WindowScreen *joint_screen = new WindowScreen(ScreenType::JOINT, &capture_data->status, &frontend_data.display_data, &frontend_data.shared_data, audio_data, &draw_lock, override_data.disable_frame_blending);
 	frontend_data.top_screen = top_screen;
 	frontend_data.bot_screen = bot_screen;
 	frontend_data.joint_screen = joint_screen;
 
 	if(!override_data.recovery_mode)
-		load_layout_file(override_data.loaded_profile, &frontend_data, audio_data, out_text_data, &capture_data->status, skip_io, false, created_proper_folder, true);
+		load_layout_file(override_data.loaded_profile, &frontend_data, audio_data, out_text_data, &capture_data->status, skip_io, false, true);
 	if(override_data.volume != DEFAULT_NO_VOLUME_VALUE)
 		audio_data->set_audio_volume(override_data.volume);
 	override_set_data_to_screen_info(override_data.override_top_bot_data, frontend_data.joint_screen->m_info);
@@ -469,16 +674,16 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 	std::thread bot_thread(screen_display_thread, bot_screen);
 	std::thread joint_thread(screen_display_thread, joint_screen);
 
-	capture_data->status.connected = connect(true, capture_data, &frontend_data, override_data.auto_connect_to_first);
-	if(override_data.quit_on_first_connection_failure && (!capture_data->status.connected)) {
-		capture_data->status.running = false;
-		ret_val = -3;
-	}
-	bool last_connected = capture_data->status.connected;
-	SuccessConnectionOutTextGenerator(out_text_data, capture_data);
+	bool last_connected = false;
 	int no_data_consecutive = 0;
 
+	if(override_data.print_controller_list)
+		joystick_print_all();
+
 	while(capture_data->status.running) {
+		check_for_first_connection(did_first_connection, start_time, capture_data, &frontend_data, force_cc_disables, override_data, out_text_data, ret_val);
+		if(!capture_data->status.running)
+			break;
 
 		bool polled = false;
 		bool poll_everything = true;
@@ -489,42 +694,47 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 		else if(frontend_data.shared_data.input_data.fast_poll)
 			poll_timeout = LOW_POLL_DIVISOR;
 		VideoOutputData *chosen_buf = out_buf;
+		InputVideoDataType video_data_type = VIDEO_DATA_RGB;
 		bool blank_out = false;
 		bool is_connected = capture_data->status.connected;
 		if(is_connected != last_connected) {
 			update_connected_specific_settings(&frontend_data, capture_data->status.device);
 			no_data_consecutive = 0;
-			num_allowed_blanks = MAX_ALLOWED_BLANKS;
+			last_valid_frame_time = std::chrono::high_resolution_clock::now();
 		}
 		last_connected = is_connected;
 		if(is_connected) {
 			if(no_data_consecutive > NO_DATA_CONSECUTIVE_THRESHOLD)
 				no_data_consecutive = NO_DATA_CONSECUTIVE_THRESHOLD;
 			capture_data->status.video_wait.update_time_multiplier(get_time_multiplier(capture_data, no_data_consecutive >= NO_DATA_CONSECUTIVE_THRESHOLD));
+
 			bool timed_out = !capture_data->status.video_wait.timed_lock();
+
 			bool data_processed = false;
 			CaptureDataSingleBuffer* data_buffer = capture_data->data_buffers.GetReaderBuffer(CAPTURE_READER_VIDEO);
-
 			if(data_buffer != NULL) {
 				last_frame_time = data_buffer->time_in_buf;
-				if(data_buffer->read >= get_video_in_size(capture_data)) {
-					if(capture_data->status.cooldown_curr_in)
+				if(data_buffer->read >= get_video_in_size(capture_data, data_buffer->is_3d, data_buffer->should_be_3d, data_buffer->buffer_video_data_type)) {
+					if(capture_data->status.cooldown_curr_in || (!capture_data->status.connected))
 						blank_out = true;
 					else {
-						bool conversion_success = convertVideoToOutput(out_buf, endianness, data_buffer, &capture_data->status);
+						video_data_type = data_buffer->buffer_video_data_type;
+						bool conversion_success = convertVideoToOutput(out_buf, endianness, data_buffer, &capture_data->status, frontend_data.display_data.interleaved_3d);
 						if(!conversion_success)
 							UpdateOutText(out_text_data, "", "Video conversion failed...", TEXT_KIND_NORMAL);
 					}
-					num_allowed_blanks = MAX_ALLOWED_BLANKS;
+					last_valid_frame_time = std::chrono::high_resolution_clock::now();
 					no_data_consecutive = 0;
 					data_processed = true;
 				}
 				capture_data->data_buffers.ReleaseReaderBuffer(CAPTURE_READER_VIDEO);
 			}
 			if(!data_processed) {
-				if(num_allowed_blanks > 0)
-					num_allowed_blanks--;
-				else 
+				auto curr_time = std::chrono::high_resolution_clock::now();
+				const std::chrono::duration<double> diff = curr_time - last_valid_frame_time;
+				if(diff.count() > max_time_no_frames_allowed)
+					blank_out = true;
+				if(capture_data->status.cooldown_curr_in || (!capture_data->status.connected))
 					blank_out = true;
 				no_data_consecutive++;
 			}
@@ -542,7 +752,10 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 		if(frontend_data.shared_data.input_data.fast_poll)
 			poll_all_windows(&frontend_data, poll_everything, polled);
 
-		update_output(&frontend_data, last_frame_time, chosen_buf);
+		*can_do_output = should_do_output(&frontend_data);
+
+		if(*can_do_output)
+			update_output(&frontend_data, last_frame_time, chosen_buf, video_data_type);
 
 		if(!frontend_data.shared_data.input_data.fast_poll)
 			poll_all_windows(&frontend_data, poll_everything, polled);
@@ -562,23 +775,29 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 		}
 
 		if(top_screen->open_capture() || bot_screen->open_capture() || joint_screen->open_capture()) {
-			capture_data->status.connected = connect(true, capture_data, &frontend_data);
-			SuccessConnectionOutTextGenerator(out_text_data, capture_data);
+			if(did_first_connection) {
+				capture_data->status.connected = connect(true, capture_data, &frontend_data, force_cc_disables);
+				SuccessConnectionOutTextGenerator(out_text_data, capture_data);
+			}
 		}
 
 		check_close_application(top_screen, capture_data, ret_val);
 		check_close_application(bot_screen, capture_data, ret_val);
 		check_close_application(joint_screen, capture_data, ret_val);
+		if(override_data.auto_close && (!capture_data->status.connected)) {
+			capture_data->status.running = false;
+			ret_val = -4;
+		}
 		
 		if((load_index = top_screen->load_data()) || (load_index = bot_screen->load_data()) || (load_index = joint_screen->load_data())) {
 			// This value should only be loaded when starting the program...
 			bool previous_last_connected_ds = frontend_data.display_data.last_connected_ds;
-			load_layout_file(load_index, &frontend_data, audio_data, out_text_data, &capture_data->status, skip_io, true, created_proper_folder, false);
+			load_layout_file(load_index, &frontend_data, audio_data, out_text_data, &capture_data->status, skip_io, true, false);
 			frontend_data.display_data.last_connected_ds = previous_last_connected_ds;
 		}
 		
 		if((save_index = top_screen->save_data()) || (save_index = bot_screen->save_data()) || (save_index = joint_screen->save_data())) {
-			save_layout_file(save_index, &frontend_data, audio_data, out_text_data, &capture_data->status, skip_io, true, created_proper_folder);
+			save_layout_file(save_index, &frontend_data, audio_data, out_text_data, &capture_data->status, skip_io, true);
 			top_screen->update_save_menu();
 			bot_screen->update_save_menu();
 			joint_screen->update_save_menu();
@@ -593,8 +812,11 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 			capture_data->status.new_error_text = false;
 		}
 
+		top_screen->process_own_out_text_data();
+		bot_screen->process_own_out_text_data();
+		joint_screen->process_own_out_text_data();
 		if((!out_text_data.consumed) && (!frontend_data.reload)) {
-			ConsoleOutText(out_text_data.full_text);
+			ConsumeOutText(out_text_data, false);
 			top_screen->print_notification(out_text_data.small_text, out_text_data.kind);
 			bot_screen->print_notification(out_text_data.small_text, out_text_data.kind);
 			joint_screen->print_notification(out_text_data.small_text, out_text_data.kind);
@@ -614,12 +836,13 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 	bot_screen->after_thread_join();
 	joint_screen->after_thread_join();
 
-	save_layout_file(override_data.loaded_profile, &frontend_data, audio_data, out_text_data, &capture_data->status, skip_io, false, created_proper_folder);
+	if(override_data.auto_save)
+		save_layout_file(override_data.loaded_profile, &frontend_data, audio_data, out_text_data, &capture_data->status, skip_io, false);
 
-	if(!out_text_data.consumed) {
-		ConsoleOutText(out_text_data.full_text);
-		out_text_data.consumed = true;
-	}
+	top_screen->process_own_out_text_data(false);
+	bot_screen->process_own_out_text_data(false);
+	joint_screen->process_own_out_text_data(false);
+	ConsumeOutText(out_text_data);
 
 	delete out_buf;
 	return ret_val;
@@ -635,16 +858,17 @@ static bool create_folder(const std::string path) {
 		return true;
 	}
 	catch(...) {
-		std::cerr << "Error creating folder " << path << std::endl;
+		ActualConsoleOutTextError("Error creating folder " + path);
 	}
 	return false;
 }
 
 static bool create_out_folder() {
-	bool success = create_folder(LayoutPathGenerator(STARTUP_FILE_INDEX, true));
+	bool success = create_folder(get_base_path(false, false));
 	if(!success)
-		create_folder(LayoutPathGenerator(STARTUP_FILE_INDEX, false));
-	create_folder(LayoutPathGenerator(1, success));
+		create_folder(get_base_path(false));
+	create_folder(get_base_path(true));
+	create_folder(get_base_path_keys());
 	return success;
 }
 
@@ -664,7 +888,35 @@ static bool parse_int_arg(int &index, int argc, char **argv, int &target, std::s
 		target = std::stoi(argv[index]);
 	}
 	catch(...) {
-		std::cerr << "Error with input for: " << to_check << std::endl;
+		ActualConsoleOutTextError("Error with input for: " + to_check);
+	}
+	return true;
+}
+
+static bool parse_double_arg(int &index, int argc, char **argv, double &target, std::string to_check) {
+	if(argv[index] != to_check)
+		return false;
+	if((++index) >= argc)
+		return true;
+	try {
+		target = std::stod(argv[index]);
+	}
+	catch(...) {
+		ActualConsoleOutTextError("Error with input for: " + to_check);
+	}
+	return true;
+}
+
+static bool parse_string_arg(int &index, int argc, char **argv, std::string &target, std::string to_check) {
+	if(argv[index] != to_check)
+		return false;
+	if((++index) >= argc)
+		return true;
+	try {
+		target = std::string(argv[index]);
+	}
+	catch(...) {
+		ActualConsoleOutTextError("Error with input for: " + to_check);
 	}
 	return true;
 }
@@ -677,18 +929,26 @@ int main(int argc, char **argv) {
 	int enter_id = -1;
 	int power_id = -1;
 	bool use_pud_up = true;
-	bool created_proper_folder = create_out_folder();
+	volatile bool can_do_output = true;
+	bool mono_app_default_value = false;
+	std::string touch_file_path = "";
+	#ifdef ANDROID_COMPILATION
+		mono_app_default_value = true;
+	#endif
 	override_all_data override_data;
+	override_data.mono_app = mono_app_default_value;
 	for (int i = 1; i < argc; i++) {
-		if(parse_existence_arg(i, argv, override_data.mono_app, true, "--mono_app"))
+		if(parse_existence_arg(i, argv, override_data.mono_app, !mono_app_default_value, "--mono_app"))
 			continue;
 		if(parse_existence_arg(i, argv, override_data.recovery_mode, true, "--recovery_mode"))
+			continue;
+		if(parse_existence_arg(i, argv, override_data.disable_frame_blending, true, "--no_frame_blend"))
 			continue;
 		if(parse_int_arg(i, argc, argv, override_data.override_top_bot_data.pos_x, "--pos_x_both"))
 			continue;
 		if(parse_int_arg(i, argc, argv, override_data.override_top_bot_data.pos_y, "--pos_y_both"))
 			continue;
-		if(parse_int_arg(i, argc, argv, override_data.override_top_bot_data.scaling, "--scaling_both"))
+		if(parse_double_arg(i, argc, argv, override_data.override_top_bot_data.scaling, "--scaling_both"))
 			continue;
 		if(parse_int_arg(i, argc, argv, override_data.override_top_bot_data.enabled, "--enabled_both"))
 			continue;
@@ -696,17 +956,17 @@ int main(int argc, char **argv) {
 			continue;
 		if(parse_int_arg(i, argc, argv, override_data.override_top_data.pos_y, "--pos_y_top"))
 			continue;
-		if(parse_int_arg(i, argc, argv, override_data.override_top_data.scaling, "--scaling_top"))
+		if(parse_double_arg(i, argc, argv, override_data.override_top_data.scaling, "--scaling_top"))
 			continue;
 		if(parse_int_arg(i, argc, argv, override_data.override_top_data.enabled, "--enabled_top"))
 			continue;
-		if(parse_int_arg(i, argc, argv, override_data.override_bot_data.pos_x, "--pos_x_bot"))
+		if(parse_int_arg(i, argc, argv, override_data.override_bot_data.pos_x, "--pos_x_low"))
 			continue;
-		if(parse_int_arg(i, argc, argv, override_data.override_bot_data.pos_y, "--pos_y_bot"))
+		if(parse_int_arg(i, argc, argv, override_data.override_bot_data.pos_y, "--pos_y_low"))
 			continue;
-		if(parse_int_arg(i, argc, argv, override_data.override_bot_data.scaling, "--scaling_bot"))
+		if(parse_double_arg(i, argc, argv, override_data.override_bot_data.scaling, "--scaling_low"))
 			continue;
-		if(parse_int_arg(i, argc, argv, override_data.override_bot_data.enabled, "--enabled_bot"))
+		if(parse_int_arg(i, argc, argv, override_data.override_bot_data.enabled, "--enabled_low"))
 			continue;
 		if(parse_int_arg(i, argc, argv, override_data.volume, "--volume"))
 			continue;
@@ -716,9 +976,21 @@ int main(int argc, char **argv) {
 			continue;
 		if(parse_existence_arg(i, argv, override_data.auto_connect_to_first, true, "--auto_connect"))
 			continue;
+		if(parse_existence_arg(i, argv, override_data.auto_close, true, "--auto_close"))
+			continue;
 		if(parse_existence_arg(i, argv, override_data.quit_on_first_connection_failure, true, "--failure_close"))
 			continue;
+		if(parse_existence_arg(i, argv, override_data.force_disable_nisetro_ds, true, "--no_nisetro"))
+			continue;
+		if(parse_existence_arg(i, argv, override_data.force_disable_optimize_old_3ds, true, "--no_opt_o3ds_cc"))
+			continue;
 		if(parse_int_arg(i, argc, argv, override_data.loaded_profile, "--profile"))
+			continue;
+		if(parse_existence_arg(i, argv, override_data.auto_save, false, "--no_auto_save"))
+			continue;
+		if(parse_existence_arg(i, argv, override_data.print_controller_list, true, "--list_joysticks"))
+			continue;
+		if(parse_string_arg(i, argc, argv, touch_file_path, "--touch_file"))
 			continue;
 		#ifdef RASPI
 		if(parse_int_arg(i, argc, argv, page_up_id, "--pi_select"))
@@ -732,44 +1004,59 @@ int main(int argc, char **argv) {
 		if(parse_existence_arg(i, argv, use_pud_up, false, "--pi_pud_down"))
 			continue;
 		#endif
-		std::cout << "Help:" << std::endl;
-		std::cout << "  --mono_app       Enables special mode for when only this application" << std::endl;
-		std::cout << "                   should run on the system. Disabled by default." << std::endl;
-		std::cout << "  --recovery_mode  Resets to the defaults." << std::endl;
-		std::cout << "  --pos_x_both     Set default x position for the window with both screens." << std::endl;
-		std::cout << "  --pos_y_both     Set default y position for the window with both screens." << std::endl;
-		std::cout << "  --scaling_both   Overrides the scale factor for the window with both screens." << std::endl;
-		std::cout << "  --enabled_both   Overrides the presence of the window with both screens." << std::endl;
-		std::cout << "                   1 On, 0 Off." << std::endl;
-		std::cout << "  --pos_x_top      Set default x position for the top screen's window." << std::endl;
-		std::cout << "  --pos_y_top      Set default y position for the top screen's window." << std::endl;
-		std::cout << "  --scaling_top    Overrides the top screen window's scale factor." << std::endl;
-		std::cout << "  --enabled_top    Overrides the presence of the top screen's window." << std::endl;
-		std::cout << "                   1 On, 0 Off." << std::endl;
-		std::cout << "  --pos_x_bot      Set default x position for the bottom screen's window." << std::endl;
-		std::cout << "  --pos_y_bot      Set default y position for the bottom screen's window." << std::endl;
-		std::cout << "  --scaling_bot    Overrides the bottom screen window's scale factor." << std::endl;
-		std::cout << "  --enabled_bot    Overrides the presence of the bottom screen's window." << std::endl;
-		std::cout << "                   1 On, 0 Off." << std::endl;
-		std::cout << "  --volume         Overrides the saved volume for the audio. 0 - 200" << std::endl;
-		std::cout << "  --no_audio       Disables audio output and processing completely." << std::endl;
-		std::cout << "  --no_cursor      Prevents the mouse cursor from showing, unless moved." << std::endl;
-		std::cout << "  --auto_connect   Automatically connects to the first available device," << std::endl;
-		std::cout << "                   even if multiple are present." << std::endl;
-		std::cout << "  --failure_close  Automatically closes the software if the first connection" << std::endl;
-		std::cout << "                   doesn't succeed." << std::endl;
-		std::cout << "  --profile        Loads the profile with the specified ID at startup" << std::endl;
-		std::cout << "                   instead of the default one. When the program closes," << std::endl;
-		std::cout << "                   the data is also saved to the specified profile." << std::endl;
+		std::string mono_app_action_str = "Enables";
+		std::string default_mono_app_strn = "Disabled";
+		if(mono_app_default_value) {
+			mono_app_action_str = "Disables";
+			default_mono_app_strn = "Enabled";
+		}
+		ActualConsoleOutText("Help:");
+		ActualConsoleOutText("  --mono_app        " + mono_app_action_str + " special mode for when only this application");
+		ActualConsoleOutText("                    should run on the system. " + default_mono_app_strn + " by default.");
+		ActualConsoleOutText("  --recovery_mode   Resets to the defaults.");
+		ActualConsoleOutText("  --pos_x_both      Set default x position for the window with both screens.");
+		ActualConsoleOutText("  --pos_y_both      Set default y position for the window with both screens.");
+		ActualConsoleOutText("  --scaling_both    Overrides the scale factor for the window with both screens.");
+		ActualConsoleOutText("  --enabled_both    Overrides the presence of the window with both screens.");
+		ActualConsoleOutText("                    1 On, 0 Off.");
+		ActualConsoleOutText("  --pos_x_top       Set default x position for the top screen's window.");
+		ActualConsoleOutText("  --pos_y_top       Set default y position for the top screen's window.");
+		ActualConsoleOutText("  --scaling_top     Overrides the top screen window's scale factor.");
+		ActualConsoleOutText("  --enabled_top     Overrides the presence of the top screen's window.");
+		ActualConsoleOutText("                    1 On, 0 Off.");
+		ActualConsoleOutText("  --pos_x_low       Set default x position for the bottom screen's window.");
+		ActualConsoleOutText("  --pos_y_low       Set default y position for the bottom screen's window.");
+		ActualConsoleOutText("  --scaling_low     Overrides the bottom screen window's scale factor.");
+		ActualConsoleOutText("  --enabled_low     Overrides the presence of the bottom screen's window.");
+		ActualConsoleOutText("                    1 On, 0 Off.");
+		ActualConsoleOutText("  --no_frame_blend  Disables support for frame blending shader.");
+		ActualConsoleOutText("                    May improve compatibility with lower end hardware.");
+		ActualConsoleOutText("  --volume          Overrides the saved volume for the audio. 0 - 200");
+		ActualConsoleOutText("  --no_audio        Disables audio output and processing completely.");
+		ActualConsoleOutText("  --no_cursor       Prevents the mouse cursor from showing, unless moved.");
+		ActualConsoleOutText("  --auto_connect    Automatically connects to the first available device,");
+		ActualConsoleOutText("                    even if multiple are present.");
+		ActualConsoleOutText("  --failure_close   Automatically closes the software if the first connection");
+		ActualConsoleOutText("                    doesn't succeed.");
+		ActualConsoleOutText("  --auto_close      Automatically closes the software on disconnect.");
+		ActualConsoleOutText("  --no_nisetro      Force disables Nisetro DS(i) Capture Card.");
+		ActualConsoleOutText("  --no_opt_o3ds_cc  Force disables Optimize Old 3DS Capture Card.");
+		ActualConsoleOutText("  --profile         Loads the profile with the specified ID at startup");
+		ActualConsoleOutText("                    instead of the default one. When the program closes,");
+		ActualConsoleOutText("                    the data is also saved to the specified profile.");
+		ActualConsoleOutText("  --no_auto_save    Disables automatic save when closing the software.");
+		ActualConsoleOutText("  --list_joysticks  Prints a list of all the detected joysticks.");
+		ActualConsoleOutText("  --touch_file      Path of a file that the program should create when exiting.");
 		#ifdef RASPI
-		std::cout << "  --pi_select ID   Specifies ID for the select GPIO button." << std::endl;
-		std::cout << "  --pi_menu ID     Specifies ID for the menu GPIO button." << std::endl;
-		std::cout << "  --pi_enter ID    Specifies ID for the enter GPIO button." << std::endl;
-		std::cout << "  --pi_power ID    Specifies ID for the poweroff GPIO button." << std::endl;
-		std::cout << "  --pi_pud_down    Sets the pull-up GPIO mode to down. Default is up." << std::endl;
+		ActualConsoleOutText("  --pi_select ID    Specifies ID for the select GPIO button.");
+		ActualConsoleOutText("  --pi_menu ID      Specifies ID for the menu GPIO button.");
+		ActualConsoleOutText("  --pi_enter ID     Specifies ID for the enter GPIO button.");
+		ActualConsoleOutText("  --pi_power ID     Specifies ID for the poweroff GPIO button.");
+		ActualConsoleOutText("  --pi_pud_down     Sets the pull-up GPIO mode to down. Default is up.");
 		#endif
 		return 0;
 	}
+	create_out_folder();
 	init_extra_buttons_poll(page_up_id, page_down_id, enter_id, power_id, use_pud_up);
 	AudioData audio_data;
 	audio_data.reset();
@@ -779,15 +1066,19 @@ int main(int argc, char **argv) {
 	std::thread capture_thread(captureCall, capture_data);
 	std::thread audio_thread;
 	if(!override_data.no_audio)
-		audio_thread = std::thread(soundCall, &audio_data, capture_data);
+		audio_thread = std::thread(soundCall, &audio_data, capture_data, &can_do_output);
 
-	int ret_val = mainVideoOutputCall(&audio_data, capture_data, created_proper_folder, override_data);
+	int ret_val = mainVideoOutputCall(&audio_data, capture_data, override_data, &can_do_output);
 	if(!override_data.no_audio)
 		audio_thread.join();
 	capture_thread.join();
 	delete capture_data;
 	end_extra_buttons_poll();
 	capture_close();
+	complete_threads();
+
+	if(touch_file_path != "")
+		touch_file_at_path(touch_file_path);
 
 	return ret_val;
 }

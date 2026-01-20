@@ -18,11 +18,14 @@ enum ISNitroMenuOutAction{
 	ISN_MENU_RESET,
 	ISN_MENU_SPEED_INC,
 	ISN_MENU_SPEED_DEC,
+	ISN_MENU_BATTERY_INC,
+	ISN_MENU_BATTERY_DEC,
+	ISN_MENU_AC_ADAPTER_TOGGLE,
 };
 
 class ISNitroMenu : public OptionSelectionMenu {
 public:
-	ISNitroMenu(bool font_load_success, sf::Font &text_font);
+	ISNitroMenu(TextRectanglePool* text_pool);
 	~ISNitroMenu();
 	void prepare(float scaling_factor, int view_size_x, int view_size_y, CaptureStatus* capture_status);
 	void insert_data(CaptureDevice* device);
@@ -32,11 +35,11 @@ protected:
 	bool is_option_selectable(int index, int action);
 	bool is_option_inc_dec(int index);
 	void set_output_option(int index, int action);
-	int get_num_options();
+	size_t get_num_options();
 	std::string get_string_option(int index, int action);
 	void class_setup();
 private:
 	int *options_indexes;
-	int num_enabled_options;
+	size_t num_enabled_options;
 };
 #endif
